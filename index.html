@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>存股評分表 — 稅效+防災</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--line:#e3e6ea;--txt:#1d2733;--sub:#6b7683;
+  --buy:#0a7d43;--div:#1160c9;--hold:#8a6d1a;--sell:#c2382f;--watch:#667;--warnc:#b8860b;}
+*{box-sizing:border-box}
+body{margin:0;font-family:"PingFang TC","Microsoft JhengHei",system-ui,sans-serif;background:var(--bg);color:var(--txt);font-size:14px}
+header{padding:18px 24px 8px}
+h1{margin:0 0 4px;font-size:20px}
+.sub{color:var(--sub);font-size:12.5px;max-width:1000px}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 24px}
+.toolbar input[type=search]{padding:7px 10px;border:1px solid var(--line);border-radius:8px;width:150px;font-size:13px}
+button{padding:7px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);cursor:pointer;font-size:13px;color:var(--txt)}
+button:hover{background:#eef1f4}
+button.primary{background:#1d2733;color:#fff;border-color:#1d2733}
+#qstat{font-size:12px;color:var(--sub);max-width:520px}
+.legend{margin-left:auto;display:flex;gap:8px;font-size:12px;color:var(--sub);align-items:center}
+.weights{display:flex;gap:18px;flex-wrap:wrap;align-items:center;padding:6px 24px 12px}
+.weights .wlab{font-size:12px;color:var(--sub);font-weight:600}
+.wgrp{display:flex;flex-direction:column;gap:2px;min-width:150px}
+.wgrp .top{display:flex;justify-content:space-between;font-size:12px}
+.wgrp .top b{color:var(--txt)} .wgrp .top span{color:var(--sub)}
+.wgrp input[type=range]{width:150px;accent-color:#1d2733}
+.wreset{font-size:12px;color:var(--div);cursor:pointer;text-decoration:underline;background:none;border:none;padding:0}
+.wrap{padding:0 24px 40px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:auto;max-height:74vh}
+table{border-collapse:collapse;width:100%;min-width:2200px}
+th,td{padding:7px 9px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+th:nth-child(-n+3),td:nth-child(-n+3){text-align:left}
+td:first-child{position:sticky;left:0;background:#fff;font-weight:600;z-index:1}
+th{position:sticky;top:0;background:#fbfcfd;font-size:11.5px;color:var(--sub);cursor:pointer;user-select:none;z-index:2}
+th:first-child{left:0;z-index:3}
+th .arr{font-size:10px} th .u{display:block;color:#b0b8c1;font-size:10px;font-weight:400}
+tbody tr{cursor:pointer} tbody tr:hover td{background:#f2f6fb}
+tr.open td{background:#eef4fc!important}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:12px;font-weight:600}
+.badge.buy{background:#e2f5ea;color:var(--buy)} .badge.div{background:#e5eefb;color:var(--div)}
+.badge.hold{background:#f7f0da;color:var(--hold)} .badge.sell{background:#fbe7e5;color:var(--sell)}
+.badge.watch{background:#ececf1;color:var(--watch)}
+.pos{color:var(--buy)} .neg{color:var(--sell)}
+.ok{background:#eaf6ef} .bad{background:#fdf0ef}
+.warn{color:var(--warnc);font-size:11px}
+.sc{font-weight:700} .sc.hi{color:var(--buy)} .sc.mid{color:#8a6d1a} .sc.lo{color:var(--sell)}
+.pillcell{font-weight:600}
+.detail td{background:#fafbfd!important;cursor:default}
+.panel{display:grid;grid-template-columns:minmax(430px,1fr) 400px;gap:18px;padding:14px 6px;text-align:left;max-width:1180px;position:sticky;left:0}
+.inputs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;align-content:start}
+.inputs label{display:flex;flex-direction:column;font-size:11px;color:var(--sub);gap:2px}
+.inputs input,.inputs select{padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:13px;text-align:right;background:#fff}
+.inputs input[type=date],.inputs input[type=text],.inputs select{text-align:left}
+.brk{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:12.5px;height:fit-content}
+.brk h4{margin:2px 0 6px;font-size:13px}
+.brk .pil{display:flex;justify-content:space-between;font-weight:700;padding:5px 0 2px;border-bottom:1px solid var(--line);margin-top:6px}
+.brk .pil .w{color:var(--sub);font-weight:400;font-size:11px}
+.brk .row{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px dashed #eef1f4}
+.brk .lbl{color:var(--sub)} .brk .neu{color:var(--warnc)}
+.brk .tot{display:flex;justify-content:space-between;font-weight:800;font-size:14px;padding-top:8px}
+.acts{grid-column:1/-1;display:flex;gap:8px}.acts .del{color:var(--sell)}
+details.logic{margin:6px 24px 0;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 18px;font-size:13px;line-height:1.75}
+details.logic summary{cursor:pointer;font-weight:600}
+details.logic code{background:#f0f2f5;padding:1px 5px;border-radius:4px;font-size:12px}
+details.logic table{min-width:0;border-collapse:collapse;margin:6px 0}
+details.logic td,details.logic th{border:1px solid var(--line);padding:4px 8px;font-size:12px;text-align:left}
+.gauge{margin:8px 24px 0;border-radius:12px;padding:12px 18px;display:flex;gap:22px;align-items:center;flex-wrap:wrap;border:1px solid var(--line)}
+.gauge.hot{background:linear-gradient(90deg,#fdecea,#fff5f0);border-color:#f3c1ba}
+.gauge.warm{background:linear-gradient(90deg,#fdf6e3,#fffdf5);border-color:#ead9a8}
+.gauge.mild{background:linear-gradient(90deg,#eef4fc,#f8fbff);border-color:#bcd4f0}
+.gauge.cold{background:linear-gradient(90deg,#e8f5ee,#f4fbf7);border-color:#b5dfc8}
+.gauge .big{font-size:26px;font-weight:800}
+.gauge.hot .big{color:var(--sell)} .gauge.warm .big{color:#8a6d1a} .gauge.mild .big{color:var(--div)} .gauge.cold .big{color:var(--buy)}
+.gauge .gz{font-size:15px;font-weight:700}
+.gauge .gi{font-size:12px;color:var(--sub);line-height:1.6}
+.gauge .stance{font-size:12.5px;background:#fff;border:1px dashed var(--line);border-radius:8px;padding:6px 10px;max-width:340px;line-height:1.55}
+#advpop{position:fixed;z-index:99;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.18);padding:12px 14px;max-width:410px;font-size:12.5px;line-height:1.7;display:none}
+#advpop .advtitle{font-weight:700;margin-bottom:6px;font-size:13px}
+#advpop .advsec{padding:5px 0;border-top:1px dashed #eef1f4}
+#advpop .advsec b.h{display:block;color:var(--sub);font-size:11px;margin-bottom:2px}
+#advpop .close{float:right;cursor:pointer;color:var(--sub);font-size:14px;padding:0 4px}
+.holdin{width:78px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;text-align:right;font-size:12.5px;background:#fffdf0}
+.holdin:focus{outline:2px solid #d5c58a}
+.rowdel{color:#c8ccd2;cursor:pointer;margin-right:7px;font-size:11px;font-weight:400}
+.rowdel:hover{color:var(--sell);font-weight:700}
+@media(max-width:900px){.panel{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>存股評分表 <span style="font-size:13px;color:var(--sub);font-weight:400">稅效退稅 + 高點防災</span> <span style="font-size:11px;background:#1d2733;color:#fff;border-radius:10px;padding:2px 8px;vertical-align:2px">版本 2026-07-17b</span></h1>
+  <div class="sub">總分 = 稅效股利 + 填息力 + 防禦抗跌 + 品質,四支柱權重可用下方滑桿自己調。每項先換成固定級距分數再加權,單一項目不會主導。買進訊號要求「不貴」——高點時系統傾向叫你等,而不是追。<b>點任一檔的「建議」標籤</b>會彈出行動卡:該買/賣的價位、判斷理由、你的部位與稅務提醒。</div>
+</header>
+
+<div class="gauge" id="gauge"></div>
+
+<details class="logic">
+<summary>評分與買賣邏輯(點開)</summary>
+<table>
+<tr><th>支柱</th><th>項目</th><th>給分重點</th></tr>
+<tr><td rowspan="3"><b>稅效股利</b></td><td>盈餘現金殖利率</td><td>只算「盈餘配息」(可抵 8.5% 稅、減資/公積不算):4.5%→8 分、6%→滿分,&gt;7.5% 反而扣(常不可持續)</td></tr>
+<tr><td>配息率健康</td><td>40–70% 甜蜜區滿分;&gt;100% 或 EPS 虧損趨近 0</td></tr>
+<tr><td>連續配息年數</td><td>≥10 年滿分</td></tr>
+<tr><td rowspan="2"><b>填息力</b></td><td>填息率(近5次)</td><td>領息不填息=課稅又賠價差。填息比例越高越好</td></tr>
+<tr><td>填息速度</td><td>越快越好,≤10 天滿分、180 天→0</td></tr>
+<tr><td rowspan="3"><b>防禦抗跌</b></td><td>相對便宜度</td><td>現殖利率 ÷ 自己5年平均:≥1 表示比平常便宜(高點防災核心)。&lt;0.9 標「偏貴」</td></tr>
+<tr><td>低波動</td><td>近3年年化波動,越低越防禦</td></tr>
+<tr><td>抗跌</td><td>近5年最大回撤,跌得越淺越好</td></tr>
+<tr><td rowspan="2"><b>品質</b></td><td>ROE</td><td>近四季稅後淨利/股東權益,≥15% 佳、≥25% 滿分</td></tr>
+<tr><td>淨利率</td><td>≥15% 滿分</td></tr>
+</table>
+<p><b>品質閘門</b>:非金融/ETF 若 ROE&lt;8% → 總分封頂 55(擋高息價值陷阱)。<b>缺資料</b>給該項中性 5 分。金融股不評 ROE、ETF 只評收益,結構性弱項自動中性。</p>
+<p><b>價格帶(自身殖利率帶)</b>:便宜價=近12月現金股利÷(自身5年平均殖利率×1.3)、合理價=÷1.0、貴價=÷0.9——即「殖利率回到這檔自己的歷史常態」的價位,與你原 Excel 買進/賣出價同一邏輯。每檔用自己的常態,存股用存股的尺、成長股用成長股的尺,不會再出現「台積電要跌回 236」的荒謬目標。近12月無配息者退回「5年均息×16/20/25」估算並標註。<b>持有價</b>欄可直接在表格內輸入你的成本,行動卡會用它算損益。</p>
+<p><b>建議</b>:近四季EPS&lt;0 或總分&lt;40→<b>賣出</b>;總分與便宜度過門檻→<b>買進</b>;盈餘殖利率&gt;4% 且已公告發放日在未來→<b>配息</b>;總分≥55 但偏貴→<b>觀察(偏貴)</b>;總分≥55→<b>持有</b>;其餘→<b>觀察</b>。</p>
+<p><b>市場溫度計 v2(馬克斯週期,雙軸:溫度=條件、趨勢燈=引信)</b>:溫度三指標——指數 200 日乖離(量表延伸至 +50%,不再頂格失真)、槓桿溫度(融資原始增速與「超額槓桿=融資增速−指數漲幅」各半:漲勢若非融資推動,溫度應誠實反映)、股票池便宜度中位數(EPS 成長中位數為正時給最多 −10 度減溫,盈餘推的漲不同於本夢比推的漲)。<b>趨勢燈</b>獨立於溫度:完好(在60日線上且距高點&lt;8%)/轉弱/破壞(跌破200日線)。</p>
+<p><b>溫度只說「摔下來會多痛」,趨勢燈才說「開始摔了沒」。</b>檔位:<code>低溫&lt;25:買進門檻 0.85+60</code>、<code>回溫:0.95+65</code>、<code>偏熱:1.05+70</code>、<code>過熱+趨勢完好:停發一般買進,僅留嚴選門(便宜度≥1.1 且總分≥75 且填息率≥0.6 →「買進(嚴選)」)</code>、<code>過熱(不論趨勢):總分&lt;55 且便宜度&lt;0.5 →「減碼(過熱)」,趁強出貨</code>、<code>過熱+趨勢轉弱:貴且填息差的持股亮「減碼」</code>、<code>過熱+趨勢破壞:便宜度&lt;0.8 全亮「減碼」</code>。賣出的階梯:<b>賣出</b>=個股本身壞了(虧損或總分&lt;40),與市場冷熱無關;<b>減碼(過熱)</b>=個股沒壞但「平庸+極貴」,趁趨勢還在時分批降低曝險;<b>減碼</b>=引信點燃後的防禦執行。按「完整更新」連同溫度計刷新。</p>
+</details>
+
+<div class="toolbar">
+  <input type="search" id="q" placeholder="搜尋名稱/代號…">
+  <button class="primary" id="quote">⟳ 更新股價</button>
+  <button class="primary" id="full">⟳ 完整更新(含基本面)</button>
+  <button id="tok" title="FinMind 免費 token,完整更新建議填(600 次/小時)">API token</button>
+  <button id="add">＋ 新增</button>
+  <button id="reset">還原預設</button>
+  <button id="export">匯出 JSON</button>
+  <span id="qstat"></span>
+  <div class="legend">
+    <span class="badge buy">買進</span><span class="badge div">配息</span>
+    <span class="badge hold">持有</span><span class="badge watch">觀察</span><span class="badge sell">賣出</span>
+  </div>
+</div>
+
+<div class="weights">
+  <span class="wlab">權重</span>
+  <div class="wgrp"><div class="top"><b>稅效股利</b><span id="wv-tax"></span></div><input type="range" id="w-tax" min="0" max="100"></div>
+  <div class="wgrp"><div class="top"><b>填息力</b><span id="wv-fill"></span></div><input type="range" id="w-fill" min="0" max="100"></div>
+  <div class="wgrp"><div class="top"><b>防禦抗跌</b><span id="wv-defense"></span></div><input type="range" id="w-defense" min="0" max="100"></div>
+  <div class="wgrp"><div class="top"><b>品質</b><span id="wv-quality"></span></div><input type="range" id="w-quality" min="0" max="100"></div>
+  <button class="wreset" id="wreset">重設權重</button>
+</div>
+
+<div class="wrap"><div class="card">
+<table id="tbl">
+<thead><tr>
+  <th data-k="name">名稱 <span class="arr"></span></th>
+  <th data-k="code">代號 <span class="arr"></span></th>
+  <th data-k="M">建議 <span class="arr"></span></th>
+  <th data-k="total">總分 <span class="arr"></span></th>
+  <th data-k="s:tax">稅效 <span class="u">/滿100</span><span class="arr"></span></th>
+  <th data-k="s:fill">填息 <span class="u">/滿100</span><span class="arr"></span></th>
+  <th data-k="s:defense">防禦 <span class="u">/滿100</span><span class="arr"></span></th>
+  <th data-k="s:quality">品質 <span class="u">/滿100</span><span class="arr"></span></th>
+  <th data-k="J">股價 <span class="arr"></span></th>
+  <th data-k="cheap">相對便宜 <span class="u">≥1便宜</span><span class="arr"></span></th>
+  <th data-k="divYldEarn">盈餘殖利率 <span class="u">可抵稅</span><span class="arr"></span></th>
+  <th data-k="divYldAll">總殖利率 <span class="arr"></span></th>
+  <th data-k="cheapP">便宜價 <span class="arr"></span></th>
+  <th data-k="fairP">合理價 <span class="arr"></span></th>
+  <th data-k="expP">貴價 <span class="arr"></span></th>
+  <th data-k="fillRate">填息率 <span class="arr"></span></th>
+  <th data-k="fillDays">填息天 <span class="arr"></span></th>
+  <th data-k="roe">ROE <span class="arr"></span></th>
+  <th data-k="vol">波動 <span class="arr"></span></th>
+  <th data-k="mdd">最大回撤 <span class="arr"></span></th>
+  <th data-k="divYears">連配 <span class="arr"></span></th>
+  <th data-k="payout">配息率 <span class="arr"></span></th>
+  <th data-k="ttmEPS">EPS <span class="u">近4季</span><span class="arr"></span></th>
+  <th data-k="AK">EPS成長 <span class="arr"></span></th>
+  <th data-k="AA">淨利率 <span class="arr"></span></th>
+  <th data-k="hold">持有價 <span class="arr"></span></th>
+</tr></thead>
+<tbody></tbody>
+</table>
+</div></div>
+<div id="advpop"></div>
+
+<script>
+const DEFAULT_DATA = [{"name": "緯穎", "code": "6669", "type": "stock", "J": 4620, "Jdate": "2026-07-17", "vol": 0.5562, "mdd": -0.4705, "divEarn1": 144.392, "div1": 144.392, "divYldEarn": 0.0313, "divYldAll": 0.0313, "div5": 73.478, "divYears": 9, "cheap": 0.663, "avgYld5": 0.0471, "fillRate": 1, "fillN": 5, "fillDays": 24, "q1": 65.23, "q2": 82.92, "q3": 74.21, "q4": 75.95, "AK": 0.9613, "AA": 5.25, "roe": 0.3955, "hold": null}, {"name": "禾聯碩", "code": "5283", "type": "stock", "J": 53.0, "div1": 0.7, "div5": 5.74, "E": 0.05166, "divYears": 13, "q1": 2.59, "q2": 2.2, "q3": 1.4, "q4": 0.16, "AK": -0.0522, "revYoY": -0.0108, "T": null, "Y": 1.257707, "U": 1.609395, "AA": 8.06, "AB": null, "AC": null, "Z": 0.6705, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.1997, "mdd": -0.5912, "divEarn1": 0.7, "divYldEarn": 0.0132, "divYldAll": 0.0132, "avgYld5": 0.0789, "cheap": 0.167, "fillRate": 0.4, "fillN": 5, "fillDays": 128, "roe": 0.1081}, {"name": "邁達特", "code": "6112", "type": "stock", "J": 41.55, "div1": 0.6, "div5": 2.4, "E": 0.055, "divYears": 12, "q1": 0.13, "q2": 0.77, "q3": 0.62, "q4": 0.17, "AK": 0.0171, "revYoY": 0.1282, "T": null, "Y": 1.66, "U": 0.98, "AA": 1.73, "AB": null, "AC": null, "Z": 0.80026, "AL": "2026-08-14", "hold": null, "Jdate": "2026-07-17", "vol": 0.4545, "mdd": -0.5521, "divEarn1": 0.6, "divYldEarn": 0.0144, "divYldAll": 0.0144, "avgYld5": 0.0618, "cheap": 0.234, "fillRate": 0.4, "fillN": 5, "fillDays": 1, "roe": 0.0993}, {"name": "網家", "code": "8044", "type": "stock", "J": 26.5, "div1": 0, "div5": 0.364, "E": 0.0044, "divYears": 3, "q1": -1.1, "q2": -0.66, "q3": -2.07, "q4": -0.39, "AK": 0.0108, "revYoY": 0.0865, "T": 42.53, "Y": 1.039266, "U": 0.4408, "AA": -2.1, "AB": -4.3, "AC": 1.0729, "Z": 0.34, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.4259, "mdd": -0.8533, "divEarn1": 0, "divYldEarn": 0.0, "divYldAll": 0.0, "avgYld5": 0.0085, "cheap": 0.0, "fillRate": 0.5, "fillN": 2, "fillDays": 104, "roe": -0.118}, {"name": "富邦媒", "code": "8454", "type": "stock", "J": 254.0, "div1": 10.0, "div5": 13.12, "E": 0.0208, "divYears": 12, "q1": 2.58, "q2": 2.11, "q3": 3.48, "q4": 2.43, "AK": -0.2234, "revYoY": 0.025, "T": 35.39, "Y": 10.285391, "U": 0.53, "AA": 2.56, "AB": 56.88, "AC": 0.461, "Z": 0.87, "AL": "2026-07-13", "hold": null, "Jdate": "2026-07-17", "vol": 0.3567, "mdd": -0.919, "divEarn1": 10.0, "divYldEarn": 0.0394, "divYldAll": 0.0394, "avgYld5": 0.0527, "cheap": 0.747, "fillRate": 0.2, "fillN": 5, "fillDays": 7, "roe": 0.2691}, {"name": "鴻海", "code": "2317", "type": "stock", "J": 234.0, "div1": 7.172, "div5": 6.574, "E": 0.0317, "divYears": 13, "q1": 3.19, "q2": 4.15, "q3": 3.23, "q4": 3.56, "AK": 0.1349, "revYoY": 0.4047, "T": 100.0, "Y": 1.82, "U": 1.25, "AA": 2.64, "AB": 72.46, "AC": 1.5, "Z": 0.52, "AL": "2026-07-31", "hold": null, "Jdate": "2026-07-17", "vol": 0.3741, "mdd": -0.5033, "divEarn1": 7.172, "divYldEarn": 0.0306, "divYldAll": 0.0306, "avgYld5": 0.0554, "cheap": 0.553, "fillRate": 0.6, "fillN": 5, "fillDays": 13, "roe": 0.1271}, {"name": "聯發科", "code": "2454", "type": "stock", "J": 3370.0, "div1": 53.5, "div5": 62.303, "E": 0.0475, "divYears": 13, "q1": 17.5, "q2": 15.84, "q3": 14.4, "q4": 15.17, "AK": -0.0395, "revYoY": 0.0458, "T": 243.29, "Y": 5.137901, "U": 1.23, "AA": 17.06, "AB": 73.18, "AC": 1.2764, "Z": 1.13, "AL": "2026-07-31", "hold": null, "Jdate": "2026-07-17", "vol": 0.4506, "mdd": -0.5437, "divEarn1": 53.5, "divYldEarn": 0.0159, "divYldAll": 0.0159, "avgYld5": 0.0878, "cheap": 0.181, "fillRate": 0.8, "fillN": 5, "fillDays": 8, "roe": 0.2587}, {"name": "台積電", "code": "2330", "type": "stock", "J": 2290.0, "div1": 22.0, "div5": 14.8, "E": 0.00585, "divYears": 13, "q1": 15.36, "q2": 17.44, "q3": 19.51, "q4": 22.08, "AK": 0.4728, "revYoY": 0.3093, "T": 176.0, "Y": 5.852273, "U": 1.818, "AA": 46.97, "AB": 90.45, "AC": 2.3901, "Z": 0.0994, "AL": "2026-07-09", "hold": null, "Jdate": "2026-07-17", "vol": 0.3164, "mdd": -0.4568, "divEarn1": 22.0, "divYldEarn": 0.0096, "divYldAll": 0.0096, "avgYld5": 0.0202, "cheap": 0.476, "fillRate": 1.0, "fillN": 5, "fillDays": 6, "roe": 0.3272}, {"name": "聯電", "code": "2303", "type": "stock", "J": 144.0, "div1": 2.608, "div5": 3.332, "E": 0.0495, "divYears": 13, "q1": 0.71, "q2": 1.2, "q3": 0.8, "q4": 1.29, "AK": 0.1204, "revYoY": 0.1715, "T": null, "Y": 3.65, "U": 1.77, "AA": 20.73, "AB": 58.15, "AC": 2.15, "Z": 0.76, "AL": "2026-07-30", "hold": null, "Jdate": "2026-07-17", "vol": 0.3853, "mdd": -0.495, "divEarn1": 2.608, "divYldEarn": 0.0181, "divYldAll": 0.0181, "avgYld5": 0.0684, "cheap": 0.265, "fillRate": 0.4, "fillN": 5, "fillDays": 66, "roe": 0.1227}, {"name": "友達", "code": "2409", "type": "stock", "J": 25.8, "div1": 0.305, "div5": 0.601, "E": 0.0432, "divYears": 5, "q1": 0.26, "q2": -0.17, "q3": 0.38, "q4": -0.15, "AK": -0.3469, "revYoY": -0.0175, "T": 20.0, "Y": 0.75, "U": 0.67, "AA": 0.97, "AB": 19.77, "AC": 1.3129, "Z": 0.16, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.4525, "mdd": -0.562, "divEarn1": 0, "divYldEarn": 0.0, "divYldAll": 0.0118, "avgYld5": 0.062, "cheap": 0.191, "fillRate": 0.4, "fillN": 5, "fillDays": 2, "roe": 0.018}, {"name": "統一超", "code": "2912", "type": "stock", "J": 243.0, "div1": 9.0, "div5": 9.0, "E": 2.56, "divYears": 12, "q1": 2.92, "q2": 2.85, "q3": 2.22, "q4": 2.97, "AK": -0.009, "revYoY": 0.0503, "T": 31.94, "Y": 8.860363, "U": 0.55, "AA": 3.81, "AB": 56.75, "AC": 0.6523, "Z": 0.95, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.1707, "mdd": -0.3185, "divEarn1": 9.0, "divYldEarn": 0.037, "divYldAll": 0.037, "avgYld5": 0.0534, "cheap": 0.694, "fillRate": 0.6, "fillN": 5, "fillDays": 20, "roe": 0.2905}, {"name": "統一", "code": "1216", "type": "stock", "J": 80.0, "div1": 3.0, "div5": 3.51, "E": 0.037, "divYears": 12, "q1": 0.97, "q2": 1.06, "q3": 0.52, "q4": 1.15, "AK": 0.0364, "revYoY": 0.0251, "T": 22.85, "Y": 3.588621, "U": 0.4, "AA": 4.82, "AB": 35.23, "AC": 0.94, "Z": 0.82, "AL": "2026-09-04", "hold": null, "Jdate": "2026-07-17", "vol": 0.1941, "mdd": -0.2384, "divEarn1": 3.0, "divYldEarn": 0.0375, "divYldAll": 0.0375, "avgYld5": 0.0715, "cheap": 0.524, "fillRate": 0.2, "fillN": 5, "fillDays": 39, "roe": 0.2263}, {"name": "寶雅", "code": "5904", "type": "stock", "J": 615.0, "div1": 23.0, "div5": 24.62, "E": 0.0277, "divYears": 12, "q1": 5.58, "q2": 7.59, "q3": 8.98, "q4": 9.3, "AK": 0.1432, "revYoY": 0.1885, "T": 60.95, "Y": 8.055783, "U": 1.6, "AA": 12.82, "AB": 70.45, "AC": 0.4649, "Z": 0.89, "AL": "2026-08-07", "hold": null, "Jdate": "2026-07-17", "vol": 0.2496, "mdd": -0.557, "divEarn1": 23.0, "divYldEarn": 0.0374, "divYldAll": 0.0374, "avgYld5": 0.0593, "cheap": 0.631, "fillRate": 0.4, "fillN": 5, "fillDays": 30}, {"name": "瓦城", "code": "2729", "type": "stock", "J": 155.0, "div1": 8.084, "div5": 8.017, "E": 0.037, "divYears": 12, "q1": 1.91, "q2": 2.45, "q3": 0.24, "q4": 1.64, "AK": -0.4873, "revYoY": 0.0881, "T": 71.9, "Y": 2.899861, "U": 0.88, "AA": 4.17, "AB": 29.54, "AC": null, "Z": 0.8, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.2287, "mdd": -0.5402, "divEarn1": 8.084, "divYldEarn": 0.0522, "divYldAll": 0.0522, "avgYld5": 0.0576, "cheap": 0.905, "fillRate": 0.2, "fillN": 5, "fillDays": 179, "roe": 0.1019}, {"name": "漢來美食", "code": "1268", "type": "stock", "J": 169.5, "div1": 7.5, "div5": 5.5, "E": 0.0395, "divYears": 10, "q1": 1.76, "q2": 1.55, "q3": 2.42, "q4": 5.87, "AK": 0.1946, "revYoY": 0.1873, "T": null, "Y": 3.13, "U": 0.43, "AA": 7.56, "AB": 26.93, "AC": 1.19, "Z": 1.1, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.2055, "mdd": -0.3441, "divEarn1": 7.5, "divYldEarn": 0.0442, "divYldAll": 0.0442, "avgYld5": 0.0393, "cheap": 1.126, "fillRate": 0.6, "fillN": 5, "fillDays": 29, "roe": 0.1919}, {"name": "國巨", "code": "2327", "type": "stock", "J": 699.0, "div1": 5.999, "div5": 15.229, "E": 0.056, "divYears": 12, "q1": 9.74, "q2": 3.1, "q3": 3.29, "q4": 3.9, "AK": -0.5216, "revYoY": 0.3076, "T": 62.65, "Y": 9.497207, "U": 0.76, "AA": 18.75, "AB": 62.65, "AC": 1.0884, "Z": 0.44, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.6421, "mdd": -0.8327, "divEarn1": 5.999, "divYldEarn": 0.0086, "divYldAll": 0.0086, "avgYld5": 0.0445, "cheap": 0.193, "fillRate": 1.0, "fillN": 5, "fillDays": 9, "roe": 0.1573}, {"name": "華新科", "code": "2492", "type": "stock", "J": 307.5, "div1": 2.503, "div5": 3.998, "E": 0.0442, "divYears": 12, "q1": -0.44, "q2": 2.18, "q3": 1.79, "q4": 1.69, "AK": -0.1429, "revYoY": 0.1455, "T": null, "Y": 1.0, "U": 1.55, "AA": 8.63, "AB": 61.09, "AC": 1.37, "Z": 0.36, "AL": "2026-07-29", "hold": null, "Jdate": "2026-07-17", "vol": 0.5217, "mdd": -0.7077, "divEarn1": 2.503, "divYldEarn": 0.0081, "divYldAll": 0.0081, "avgYld5": 0.054, "cheap": 0.151, "fillRate": 0.8, "fillN": 5, "fillDays": 9, "roe": 0.0601}, {"name": "禾伸堂", "code": "3026", "type": "stock", "J": 690.0, "div1": 5.8, "div5": 7.66, "E": 0.0504, "divYears": 13, "q1": 1.39, "q2": 1.68, "q3": 1.83, "q4": 2.86, "AK": 0.2436, "revYoY": 0.1419, "T": null, "Y": 1.66, "U": 1.8, "AA": 8.98, "AB": 46.73, "AC": 2.56, "Z": 0.95, "AL": "2026-07-17", "hold": null, "Jdate": "2026-07-17", "vol": 0.4243, "mdd": -0.5172, "divEarn1": 5.8, "divYldEarn": 0.0084, "divYldAll": 0.0084, "avgYld5": 0.0919, "cheap": 0.091, "fillRate": 0.4, "fillN": 5, "fillDays": 37, "roe": 0.1265}, {"name": "禾瑞亞", "code": "3556", "type": "stock", "J": 63.8, "div1": 1.95, "div5": 3.556, "E": 0.0351, "divYears": 13, "q1": 0.43, "q2": 0.44, "q3": 0.87, "q4": 1.19, "AK": 0.6369, "revYoY": 0.3125, "T": null, "Y": 2.86, "U": 3.26, "AA": 17.03, "AB": 37.24, "AC": 4.65, "Z": 0.91, "AL": "2026-07-10", "hold": null, "Jdate": "2026-07-17", "vol": 0.3187, "mdd": -0.7035, "divEarn1": 1.95, "divYldEarn": 0.0306, "divYldAll": 0.0306, "avgYld5": 0.0896, "cheap": 0.341, "fillRate": 0.4, "fillN": 5, "fillDays": 39, "roe": 0.1544}, {"name": "潤泰全", "code": "2915", "type": "stock", "J": 50.9, "div1": 2.5, "div5": 3.18, "E": 0.0398, "divYears": 12, "q1": 0.86, "q2": 2.7, "q3": 2.58, "q4": 2.59, "AK": -0.2652, "revYoY": -0.2615, "T": null, "Y": 0.97, "U": 10.53, "AA": 424.83, "AB": 87.33, "AC": 2.26, "Z": 0.23, "AL": "2026-08-10", "hold": null, "Jdate": "2026-07-17", "vol": 0.267, "mdd": -0.7082, "divEarn1": 0, "divYldEarn": 0.0, "divYldAll": 0.0491, "avgYld5": 0.0546, "cheap": 0.9, "fillRate": 0.8, "fillN": 5, "fillDays": 11, "roe": 0.081}, {"name": "潤泰新", "code": "9945", "type": "stock", "J": 26.25, "div1": 1.1, "div5": 1.34, "E": 0.0323, "divYears": 3, "q1": 0.48, "q2": 0.96, "q3": 1.25, "q4": 0.99, "AK": -0.2397, "revYoY": 0.5091, "T": null, "Y": 2.29, "U": 1.14, "AA": 30.86, "AB": null, "AC": null, "Z": 0.25, "AL": "2026-07-31", "hold": null, "Jdate": "2026-07-17", "vol": 0.291, "mdd": -0.73, "divEarn1": 0.494, "divYldEarn": 0.0188, "divYldAll": 0.0419, "avgYld5": 0.0505, "cheap": 0.83, "fillRate": 0.8, "fillN": 5, "fillDays": 14, "roe": 0.1121}, {"name": "勤美", "code": "1532", "type": "stock", "J": 23.1, "div1": 1.734, "div5": 1.502, "E": 0.0519, "divYears": 12, "q1": 0.13, "q2": 0.95, "q3": 0.17, "q4": -0.09, "AK": -0.2267, "revYoY": 0.1521, "T": null, "Y": 0.103053, "U": 0.5, "AA": 5.22, "AB": null, "AC": null, "Z": 0.71, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.2853, "mdd": -0.636, "divEarn1": 1.734, "divYldEarn": 0.0751, "divYldAll": 0.0751, "avgYld5": 0.0666, "cheap": 1.127, "fillRate": 0.8, "fillN": 5, "fillDays": 39, "roe": 0.0546}, {"name": "統一證", "code": "2855", "type": "fin", "J": 44.15, "div1": 2.11, "div5": 1.662, "E": 0.0698, "divYears": 9, "q1": -0.05, "q2": 0.38, "q3": 1.34, "q4": 1.33, "AK": 0.0, "revYoY": null, "T": null, "Y": 1.385787, "U": 0.44, "AA": null, "AB": null, "AC": null, "Z": 0.67, "AL": "2026-07-17", "hold": null, "Jdate": "2026-07-17", "vol": 0.3094, "mdd": -0.4956, "divEarn1": 2.11, "divYldEarn": 0.0478, "divYldAll": 0.0478, "avgYld5": 0.112, "cheap": 0.427, "fillRate": 0.8, "fillN": 5, "fillDays": 28}, {"name": "康和證", "code": "6016", "type": "fin", "J": 24.0, "div1": 0.225, "div5": 0.729, "E": 0.0751, "divYears": 2, "q1": 0.14, "q2": 1.56, "q3": 0.87, "q4": 1.65, "AK": 37.3636, "revYoY": null, "T": null, "Y": 1.198877, "U": 0.32, "AA": null, "AB": null, "AC": null, "Z": 0.45, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.3195, "mdd": -0.4759, "divEarn1": 0.225, "divYldEarn": 0.0094, "divYldAll": 0.0094, "avgYld5": 0.1313, "cheap": 0.071, "fillRate": 0.5, "fillN": 4, "fillDays": 81}, {"name": "中鋼", "code": "2002", "type": "stock", "J": 18.65, "div1": 0.33, "div5": 1.046, "E": 0.003077, "divYears": 12, "q1": -0.12, "q2": -0.16, "q3": -0.02, "q4": -0.16, "AK": -5.1818, "revYoY": null, "T": null, "Y": 1.071429, "U": 0.99, "AA": -1.97, "AB": null, "AC": null, "Z": 1.82, "AL": "2026-08-26", "hold": null, "Jdate": "2026-07-17", "vol": 0.2409, "mdd": -0.5593, "divEarn1": 0.33, "divYldEarn": 0.0177, "divYldAll": 0.0177, "avgYld5": 0.0371, "cheap": 0.477, "fillRate": 0.4, "fillN": 5, "fillDays": 14, "roe": -0.0211}, {"name": "台泥", "code": "1101", "type": "stock", "J": 23.5, "div1": 0.8, "div5": 1.533, "E": 0.0504, "divYears": 13, "q1": 0.0, "q2": -1.36, "q3": -0.32, "q4": 0.1, "AK": -2.254, "revYoY": null, "T": 31.94, "Y": 1.06293, "U": 1.48, "AA": -7.72, "AB": 22.97, "AC": 1.7476, "Z": 0.66, "AL": "2026-07-28", "hold": null, "Jdate": "2026-07-17", "vol": 0.216, "mdd": -0.6215, "divEarn1": 0, "divYldEarn": 0.0, "divYldAll": 0.034, "avgYld5": 0.0649, "cheap": 0.525, "fillRate": 0.4, "fillN": 5, "fillDays": 4, "roe": -0.0473}, {"name": "亞泥", "code": "1102", "type": "stock", "J": 33.25, "div1": 2.2, "div5": 3.152, "E": 0.0588, "divYears": 12, "q1": 0.88, "q2": 1.13, "q3": 0.58, "q4": 0.56, "AK": -0.0708, "revYoY": null, "T": null, "Y": 0.92, "U": 1.2, "AA": 15.33, "AB": null, "AC": null, "Z": 0.7, "AL": "2026-08-14", "hold": null, "Jdate": "2026-07-17", "vol": 0.2009, "mdd": -0.3898, "divEarn1": 2.2, "divYldEarn": 0.0662, "divYldAll": 0.0662, "avgYld5": 0.1212, "cheap": 0.546, "fillRate": 0.6, "fillN": 5, "fillDays": 27, "roe": 0.06}, {"name": "台玻", "code": "1802", "type": "stock", "J": 56.6, "div1": 0, "div5": 0.464, "E": 0.031, "divYears": 2, "q1": -0.3, "q2": 0.1, "q3": 0.13, "q4": 0.2, "AK": null, "revYoY": null, "T": null, "Y": 0.97, "U": 1.48, "AA": 0.68, "AB": null, "AC": null, "Z": 0.46, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.5609, "mdd": -0.7348, "divEarn1": 0, "divYldEarn": 0.0, "divYldAll": 0.0, "avgYld5": 0.0673, "cheap": 0.0, "fillRate": 0.5, "fillN": 2, "fillDays": 129, "roe": 0.0058}, {"name": "大立光", "code": "3008", "type": "stock", "J": 4010.0, "div1": 80.0, "div5": 98.431, "E": 0.0206, "divYears": 13, "q1": 7.73, "q2": 53.05, "q3": 50.35, "q4": 46.63, "AK": -0.1978, "revYoY": null, "T": 1305.77, "Y": 2.113695, "U": 6.33, "AA": 34.12, "AB": 95.99, "AC": null, "Z": 0.33, "AL": "2023-03-16", "hold": null, "Jdate": "2026-07-17", "vol": 0.407, "mdd": -0.5032, "divEarn1": 80.0, "divYldEarn": 0.02, "divYldAll": 0.02, "avgYld5": 0.0524, "cheap": 0.381, "fillRate": 0.8, "fillN": 5, "fillDays": 43, "roe": 0.1148}, {"name": "漢唐", "code": "2404", "type": "stock", "J": 1160.0, "div1": 28.0, "div5": 23.425, "E": 0.0722, "divYears": 12, "q1": 7.41, "q2": 16.11, "q3": 14.01, "q4": 16.31, "AK": 0.469, "revYoY": null, "T": null, "Y": 3.67, "U": 0.41, "AA": 13.67, "AB": null, "AC": null, "Z": 0.97, "AL": "2026-08-14", "hold": null, "Jdate": "2026-07-17", "vol": 0.4509, "mdd": -0.4577, "divEarn1": 28.0, "divYldEarn": 0.0241, "divYldAll": 0.0241, "avgYld5": 0.0627, "cheap": 0.385, "fillRate": 0.8, "fillN": 5, "fillDays": 55, "roe": 0.7117}, {"name": "華夏", "code": "1305", "type": "stock", "J": 12.65, "div1": 0.15, "div5": 1.04, "E": 0.0546, "divYears": 12, "q1": -0.7, "q2": -0.18, "q3": -0.24, "q4": -0.21, "AK": -0.3079, "revYoY": null, "T": null, "Y": 1.34, "U": 2.54, "AA": -8.83, "AB": null, "AC": null, "Z": 0.58, "AL": "2026-08-21", "hold": null, "Jdate": "2026-07-17", "vol": 0.4071, "mdd": -0.7968, "divEarn1": 0.15, "divYldEarn": 0.0119, "divYldAll": 0.0119, "avgYld5": 0.074, "cheap": 0.16, "fillRate": 0.8, "fillN": 5, "fillDays": 44, "roe": -0.1091}, {"name": "富邦金", "code": "2881", "type": "fin", "J": 124.5, "div1": 4.25, "div5": 3.8, "E": 0.0453, "divYears": 12, "q1": 3.0, "q2": 0.49, "q3": 2.74, "q4": 2.14, "AK": -0.2228, "revYoY": null, "T": null, "Y": 1.21, "U": 0.09, "AA": null, "AB": null, "AC": null, "Z": 0.39, "AL": "2026-07-31", "hold": null, "Jdate": "2026-07-17", "vol": 0.2501, "mdd": -0.4335, "divEarn1": 4.25, "divYldEarn": 0.0341, "divYldAll": 0.0341, "avgYld5": 0.0542, "cheap": 0.63, "fillRate": 0.8, "fillN": 5, "fillDays": 23}, {"name": "長榮", "code": "2603", "type": "stock", "J": 198.0, "div1": 16.0, "div5": 29.79, "E": 0.0521, "divYears": 6, "q1": 5.06, "q2": 10.04, "q3": 3.94, "q4": 3.84, "AK": -0.6697, "revYoY": null, "T": 249.86, "Y": 0.854479, "U": 2.03, "AA": 14.37, "AB": 83.94, "AC": 2.1044, "Z": 0.29925, "AL": "2026-07-17", "hold": null, "Jdate": "2026-07-17", "vol": 0.3841, "mdd": -0.6442, "divEarn1": 16.0, "divYldEarn": 0.0808, "divYldAll": 0.0808, "avgYld5": 0.3097, "cheap": 0.261, "fillRate": 0.4, "fillN": 5, "fillDays": 86, "roe": 0.0878}, {"name": "長榮航", "code": "2618", "type": "stock", "J": 41.2, "div1": 2.0, "div5": 1.518, "E": 0.0203, "divYears": 5, "q1": 1.24, "q2": 1.09, "q3": 1.41, "q4": 1.53, "AK": -0.0572, "revYoY": null, "T": null, "Y": 2.07, "U": 0.42, "AA": 13.31, "AB": null, "AC": null, "Z": 0.3, "AL": "2026-08-07", "hold": null, "Jdate": "2026-07-17", "vol": 0.3062, "mdd": -0.3869, "divEarn1": 2.0, "divYldEarn": 0.0485, "divYldAll": 0.0485, "avgYld5": 0.0608, "cheap": 0.798, "fillRate": 0.4, "fillN": 5, "fillDays": 39, "roe": 0.2221}, {"name": "瑞儀", "code": "6176", "type": "stock", "J": 84.5, "div1": 3.5, "div5": 10.022, "E": 0.0709, "divYears": 13, "q1": 1.79, "q2": 3.3, "q3": 1.99, "q4": 2.29, "AK": -0.32, "revYoY": null, "T": null, "Y": 2.67339, "U": 0.88, "AA": 8.83, "AB": null, "AC": null, "Z": 0.69, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.3393, "mdd": -0.6041, "divEarn1": 3.5, "divYldEarn": 0.0414, "divYldAll": 0.0414, "avgYld5": 0.1242, "cheap": 0.333, "fillRate": 0.6, "fillN": 5, "fillDays": 78, "roe": 0.1193}, {"name": "南帝", "code": "2108", "type": "stock", "J": 27.75, "div1": 1.0, "div5": 2.4, "E": 0.0542, "divYears": 13, "q1": 0.03, "q2": 0.24, "q3": 0.26, "q4": 0.34, "AK": -0.2984, "revYoY": null, "T": null, "Y": 1.22604, "U": 2.14, "AA": 7.76, "AB": null, "AC": null, "Z": 0.59, "AL": "2023-03-30", "hold": null, "Jdate": "2026-07-17", "vol": 0.3061, "mdd": -0.8708, "divEarn1": 1.0, "divYldEarn": 0.036, "divYldAll": 0.036, "avgYld5": 0.0823, "cheap": 0.438, "fillRate": 0.4, "fillN": 5, "fillDays": 16, "roe": 0.0536}, {"name": "威剛", "code": "3260", "type": "stock", "J": 366.5, "div1": 22.122, "div5": 7.148, "E": 0.0464, "divYears": 13, "q1": 2.75, "q2": 5.57, "q3": 13.1, "q4": 30.05, "AK": 6.0027, "revYoY": null, "T": null, "Y": 1.46, "U": 0.58, "AA": 24.61, "AB": null, "AC": null, "Z": 0.46, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.5178, "mdd": -0.5976, "divEarn1": 22.122, "divYldEarn": 0.0604, "divYldAll": 0.0604, "avgYld5": 0.0656, "cheap": 0.92, "fillRate": 0.8, "fillN": 5, "fillDays": 38, "roe": 0.6189}, {"name": "新普", "code": "6121", "type": "stock", "J": 370.5, "div1": 9.5, "div5": 27.34, "E": 0.0586, "divYears": 12, "q1": 5.65, "q2": 7.87, "q3": 9.34, "q4": 6.83, "AK": -0.0392, "revYoY": null, "T": null, "Y": 1.57, "U": 0.98, "AA": 8.52, "AB": null, "AC": null, "Z": 0.76, "AL": "2026-08-05", "hold": null, "Jdate": "2026-07-17", "vol": 0.33, "mdd": -0.4766, "divEarn1": 9.5, "divYldEarn": 0.0256, "divYldAll": 0.0256, "avgYld5": 0.0993, "cheap": 0.258, "fillRate": 0.8, "fillN": 5, "fillDays": 42, "roe": 0.1852}, {"name": "華碩", "code": "2357", "type": "stock", "J": 700.0, "div1": 42.0, "div5": 35.2, "E": 0.0764, "divYears": 13, "q1": 13.2, "q2": 14.21, "q3": 15.36, "q4": 13.19, "AK": 0.0729, "revYoY": null, "T": null, "Y": 1.02, "U": 1.02, "AA": 5.72, "AB": null, "AC": null, "Z": 1.13, "AL": "2026-07-22", "hold": null, "Jdate": "2026-07-17", "vol": 0.3959, "mdd": -0.4201, "divEarn1": 42.0, "divYldEarn": 0.06, "divYldAll": 0.06, "avgYld5": 0.116, "cheap": 0.517, "fillRate": 0.6, "fillN": 5, "fillDays": 34, "roe": 0.1593}, {"name": "聯詠", "code": "3034", "type": "stock", "J": 460.5, "div1": 23.0, "div5": 37.42, "E": 0.0997, "divYears": 13, "q1": 6.14, "q2": 6.01, "q3": 6.07, "q4": 6.19, "AK": -0.2829, "revYoY": null, "T": null, "Y": 2.49, "U": 1.57, "AA": 15.36, "AB": 83.92, "AC": 2.98, "Z": 0.76, "AL": "2026-08-11", "hold": null, "Jdate": "2026-07-17", "vol": 0.2991, "mdd": -0.6254, "divEarn1": 23.0, "divYldEarn": 0.0499, "divYldAll": 0.0499, "avgYld5": 0.1264, "cheap": 0.395, "fillRate": 0.4, "fillN": 5, "fillDays": 74, "roe": 0.2065}, {"name": "台塑", "code": "1301", "type": "stock", "J": 62.8, "div1": 1.0, "div5": 3.36, "E": 0.042, "divYears": 12, "q1": -1.04, "q2": -0.09, "q3": -0.45, "q4": 0.51, "AK": 0.4839, "revYoY": null, "T": null, "Y": 1.63, "U": 2.03, "AA": -4.01, "AB": 61.12, "AC": 1.7, "Z": 0.75, "AL": "2026-08-04", "hold": null, "Jdate": "2026-07-17", "vol": 0.3745, "mdd": -0.7335, "divEarn1": 1.0, "divYldEarn": 0.0159, "divYldAll": 0.0159, "avgYld5": 0.0594, "cheap": 0.268, "fillRate": 0.4, "fillN": 5, "fillDays": 2, "roe": -0.0175}, {"name": "南僑", "code": "1702", "type": "stock", "J": 33.9, "div1": 1.6, "div5": 2.16, "E": 0.04276, "divYears": 13, "q1": 0.17, "q2": 0.14, "q3": 0.28, "q4": 0.12, "AK": -0.7732, "revYoY": null, "T": null, "Y": 1.480625, "U": 0.54, "AA": 1.37, "AB": null, "AC": null, "Z": 0.58904, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.2038, "mdd": -0.5361, "divEarn1": 1.6, "divYldEarn": 0.0472, "divYldAll": 0.0472, "avgYld5": 0.0731, "cheap": 0.646, "fillRate": 0.4, "fillN": 5, "fillDays": 48, "roe": 0.0267}, {"name": "永豐金", "code": "2890", "type": "fin", "J": 40.0, "div1": 0.91, "div5": 0.972, "E": null, "divYears": 12, "q1": 0.57, "q2": 0.42, "q3": 0.58, "q4": 0.4, "AK": 0.1257, "revYoY": null, "T": null, "Y": null, "U": null, "AA": null, "AB": null, "AC": null, "Z": null, "AL": "2026-08-24", "hold": null, "Jdate": "2026-07-17", "vol": 0.236, "mdd": -0.2991, "divEarn1": 0.91, "divYldEarn": 0.0227, "divYldAll": 0.0227, "avgYld5": 0.0615, "cheap": 0.37, "fillRate": 0.6, "fillN": 5, "fillDays": 58}, {"name": "元大高股息", "code": "0056", "type": "etf", "J": 50.75, "div1": 3.598, "div5": 2.88, "E": null, "divYears": 13, "q1": null, "q2": null, "q3": null, "q4": null, "AK": null, "revYoY": null, "T": null, "Y": null, "U": null, "AA": null, "AB": null, "AC": null, "Z": null, "AL": "2026-08-10", "hold": null, "Jdate": "2026-07-17", "vol": 0.1945, "mdd": -0.3509, "divEarn1": 3.598, "divYldEarn": 0.0709, "divYldAll": 0.0709, "avgYld5": 0.0998, "cheap": 0.71, "fillRate": 1.0, "fillN": 5, "fillDays": 31}, {"name": "大聯大", "code": "3702", "type": "stock", "J": 109.5, "div1": 3.2, "div5": 3.43, "E": 0.0575, "divYears": 6, "q1": 1.05, "q2": 1.89, "q3": 1.7, "q4": 3.3, "AK": 0.9653, "revYoY": null, "T": null, "Y": 2.836005, "U": 0.336339, "AA": 1.34, "AB": null, "AC": null, "Z": 0.64404, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.3522, "mdd": -0.4802, "divEarn1": 3.2, "divYldEarn": 0.0292, "divYldAll": 0.0292, "avgYld5": 0.0825, "cheap": 0.354, "fillRate": 0.4, "fillN": 5, "fillDays": 114, "roe": 0.1591}, {"name": "中租-KY", "code": "5871", "type": "fin", "J": 119.5, "div1": 6.1, "div5": 7.16, "E": 0.03244, "divYears": 12, "q1": 3.28, "q2": 2.52, "q3": 2.65, "q4": 2.79, "AK": -0.1555, "revYoY": null, "T": null, "Y": 6.843403, "U": 0.20731, "AA": 21.62, "AB": null, "AC": null, "Z": 0.4488, "AL": "2026-09-01", "hold": null, "Jdate": "2026-07-17", "vol": 0.2961, "mdd": -0.6644, "divEarn1": 6.1, "divYldEarn": 0.051, "divYldAll": 0.051, "avgYld5": 0.058, "cheap": 0.88, "fillRate": 0.4, "fillN": 5, "fillDays": 62, "roe": 0.11}, {"name": "王品", "code": "2727", "type": "stock", "J": 218.5, "div1": 0, "div5": 10.773, "E": 0.0422, "divYears": 3, "q1": 3.46, "q2": 4.13, "q3": 4.01, "q4": 5.04, "AK": 0.0209, "revYoY": null, "T": null, "Y": 6.251699, "U": 0.33, "AA": 5.87, "AB": null, "AC": null, "Z": 0.91664, "AL": "2026-08-07", "hold": null, "Jdate": "2026-07-17", "vol": 0.2597, "mdd": -0.4919, "divEarn1": 0, "divYldEarn": 0.0, "divYldAll": 0.0, "avgYld5": 0.066, "cheap": 0.0, "fillRate": 0.6, "fillN": 5, "fillDays": 43, "roe": 0.3675}, {"name": "台鹽", "code": "1737", "type": "stock", "J": 31.85, "div1": 1.3, "div5": 1.37, "E": 0.04782, "divYears": 12, "q1": 0.43, "q2": 0.36, "q3": 0.72, "q4": 0.47, "AK": 0.082, "revYoY": null, "T": null, "Y": null, "U": 3.861209, "AA": 12.18, "AB": null, "AC": null, "Z": 0.82022, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.1304, "mdd": -0.2091, "divEarn1": 1.3, "divYldEarn": 0.0408, "divYldAll": 0.0408, "avgYld5": 0.0582, "cheap": 0.701, "fillRate": 0.6, "fillN": 5, "fillDays": 62, "roe": 0.0578}, {"name": "兆豐金", "code": "2886", "type": "fin", "J": 47.6, "div1": 1.6, "div5": 1.464, "E": 0.05302, "divYears": 12, "q1": 0.54, "q2": 0.69, "q3": 0.68, "q4": 0.45, "AK": 0.0043, "revYoY": null, "T": null, "Y": 0.861899, "U": 0.088172, "AA": null, "AB": null, "AC": null, "Z": 0.82648, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.1853, "mdd": -0.3548, "divEarn1": 1.6, "divYldEarn": 0.0336, "divYldAll": 0.0336, "avgYld5": 0.0815, "cheap": 0.412, "fillRate": 0.2, "fillN": 5, "fillDays": 71}, {"name": "凱薩衛", "code": "1817", "type": "stock", "J": 38.6, "div1": 2.2, "div5": 2.54, "E": 0.05446, "divYears": 13, "q1": 0.91, "q2": 1.21, "q3": 0.86, "q4": 1.21, "AK": 0.0295, "revYoY": null, "T": null, "Y": null, "U": 2.194593, "AA": 11.72, "AB": null, "AC": null, "Z": 0.65882, "AL": "2026-07-24", "hold": null, "Jdate": "2026-07-17", "vol": 0.1943, "mdd": -0.249, "divEarn1": 1.87, "divYldEarn": 0.0484, "divYldAll": 0.057, "avgYld5": 0.0833, "cheap": 0.684, "fillRate": 0.4, "fillN": 5, "fillDays": 25, "roe": 0.1299}, {"name": "雲品", "code": "2748", "type": "stock", "J": 39.6, "div1": 2.0, "div5": 1.353, "E": 0.0283, "divYears": 10, "q1": -0.26, "q2": 0.34, "q3": 1.06, "q4": 0.94, "AK": -0.2598, "revYoY": null, "T": null, "Y": 2.36, "U": 0.6, "AA": 8.93, "AB": null, "AC": null, "Z": 0.29, "AL": "2023-06-29", "hold": null, "Jdate": "2026-07-17", "vol": 0.3245, "mdd": -0.6796, "divEarn1": 2.0, "divYldEarn": 0.0505, "divYldAll": 0.0505, "avgYld5": 0.0301, "cheap": 1.678, "fillRate": 0.6, "fillN": 5, "fillDays": 13, "roe": 0.0746}, {"name": "瑞昱", "code": "2379", "type": "stock", "J": 718.0, "div1": 25.5, "div5": 21.8, "E": 0.03306, "divYears": 12, "q1": 7.62, "q2": 6.69, "q3": 5.18, "q4": 8.44, "AK": -0.1534, "revYoY": null, "T": null, "Y": 6.843403, "U": 0.664307, "AA": 11.54, "AB": null, "AC": null, "Z": 0.82052, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.3734, "mdd": -0.6183, "divEarn1": 25.5, "divYldEarn": 0.0355, "divYldAll": 0.0355, "avgYld5": 0.0767, "cheap": 0.463, "fillRate": 1.0, "fillN": 5, "fillDays": 63, "roe": 0.3168}, {"name": "群益證", "code": "6005", "type": "fin", "J": 33.0, "div1": 0, "div5": 1.194, "E": 0.04556, "divYears": 12, "q1": 0.53, "q2": 0.94, "q3": 0.77, "q4": 1.34, "AK": 0.7635, "revYoY": null, "T": null, "Y": null, "U": 0.29686, "AA": null, "AB": null, "AC": null, "Z": 0.58104, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.3194, "mdd": -0.4466, "divEarn1": 0, "divYldEarn": 0.0, "divYldAll": 0.0, "avgYld5": 0.1401, "cheap": 0.0, "fillRate": 0.8, "fillN": 5, "fillDays": 97}, {"name": "詩肯", "code": "6195", "type": "stock", "J": 26.5, "div1": 1.0, "div5": 3.248, "E": 0.06238, "divYears": 13, "q1": 0.14, "q2": 0.07, "q3": 0.08, "q4": 1.5, "AK": 0.2095, "revYoY": null, "T": null, "Y": 0.422318, "U": 0.902226, "AA": 3.87, "AB": null, "AC": null, "Z": 0.7965, "AL": "2026-07-17", "hold": null, "Jdate": "2026-07-17", "vol": 0.1961, "mdd": -0.5833, "divEarn1": 1.0, "divYldEarn": 0.0377, "divYldAll": 0.0377, "avgYld5": 0.1226, "cheap": 0.308, "fillRate": 0.4, "fillN": 5, "fillDays": 13, "roe": 0.0677}, {"name": "僑威", "code": "3078", "type": "stock", "J": 51.9, "div1": 4.0, "div5": 3.51, "E": 0.05736, "divYears": 12, "q1": 1.63, "q2": 1.49, "q3": 1.1, "q4": 0.72, "AK": -0.1739, "revYoY": null, "T": null, "Y": 1.05672, "U": 1.254894, "AA": 12.65, "AB": null, "AC": null, "Z": 0.60988, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.3536, "mdd": -0.5801, "divEarn1": 4.0, "divYldEarn": 0.0771, "divYldAll": 0.0771, "avgYld5": 0.0965, "cheap": 0.799, "fillRate": 0.4, "fillN": 5, "fillDays": 60, "roe": 0.1667}, {"name": "廣隆", "code": "1537", "type": "stock", "J": 125.0, "div1": 10.5, "div5": 8.9, "E": 0.06204, "divYears": 12, "q1": 1.24, "q2": 2.06, "q3": 2.19, "q4": 2.11, "AK": -0.3482, "revYoY": null, "T": null, "Y": 1.572133, "U": 3.147389, "AA": 9.46, "AB": null, "AC": null, "Z": 0.8459, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.1765, "mdd": -0.2599, "divEarn1": 10.5, "divYldEarn": 0.084, "divYldAll": 0.084, "avgYld5": 0.0896, "cheap": 0.938, "fillRate": 0.2, "fillN": 5, "fillDays": 21, "roe": 0.1352}, {"name": "佳格", "code": "1227", "type": "stock", "J": 29.95, "div1": 1.4, "div5": 1.936, "E": 0.0397, "divYears": 12, "q1": 0.13, "q2": 0.41, "q3": 0.39, "q4": 0.52, "AK": -0.1808, "revYoY": null, "T": null, "Y": 2.12, "U": 2.38, "AA": 4.63, "AB": 48.65, "AC": 2.4, "Z": 0.8, "AL": "2026-08-19", "hold": null, "Jdate": "2026-07-17", "vol": 0.1803, "mdd": -0.4955, "divEarn1": 1.4, "divYldEarn": 0.0467, "divYldAll": 0.0467, "avgYld5": 0.0707, "cheap": 0.661, "fillRate": 0.2, "fillN": 5, "fillDays": 90, "roe": 0.0697}, {"name": "華固", "code": "2548", "type": "stock", "J": 101.0, "div1": 13.5, "div5": 7.2, "E": 0.0725, "divYears": 13, "q1": 1.12, "q2": 1.1, "q3": 8.33, "q4": 2.28, "AK": 1.9159, "revYoY": null, "T": null, "Y": 1.470639, "U": 0.71, "AA": 18.26, "AB": null, "AC": null, "Z": 0.85242, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.3475, "mdd": -0.5018, "divEarn1": 13.5, "divYldEarn": 0.1337, "divYldAll": 0.1337, "avgYld5": 0.0972, "cheap": 1.375, "fillRate": 0.4, "fillN": 5, "fillDays": 104, "roe": 0.199}, {"name": "鋼聯", "code": "6581", "type": "stock", "J": 109.0, "div1": 5.3, "div5": 5.22, "E": 0.04282, "divYears": 10, "q1": 1.88, "q2": 1.29, "q3": 1.72, "q4": 1.17, "AK": -0.1995, "revYoY": null, "T": null, "Y": 3.497164, "U": 8.42, "AA": 31.31, "AB": null, "AC": null, "Z": 0.72138, "AL": null, "hold": null, "Jdate": "2026-07-17", "vol": 0.2185, "mdd": -0.3528, "divEarn1": 5.3, "divYldEarn": 0.0486, "divYldAll": 0.0486, "avgYld5": 0.0817, "cheap": 0.595, "fillRate": 0.6, "fillN": 5, "fillDays": 35, "roe": 0.1674}];
+let MARKET = {"date": "2026-07-17", "dev": 0.2612, "idx12m": 0.9383, "levChg": 0.388, "excess": -0.2839, "medCheap": 0.47, "medAK": -0.0459, "distHigh": -0.1007, "trend": "weak", "t_dev": 91, "t_lev": 50, "t_val": 96, "total": 79.0, "zone": "過熱(亢奮期)", "sample": 58, "ver": 2};
+const M_KEY='stock-market-v1';
+try{const m=localStorage.getItem(M_KEY); if(m){const mm=JSON.parse(m); if(mm.date>=MARKET.date) MARKET=mm;}}catch(e){}
+const LS_KEY='stock-taxdef-v2', W_KEY='stock-weights-v1';
+const DEF_W={tax:30,fill:20,defense:30,quality:20};
+const NCOL=26;
+let stocks=load(), W=loadW();
+let sortKey='total', sortDir=-1, openIdx=null, filter='';
+let currentGauge_cache=null;
+
+function load(){
+  try{
+    const s=localStorage.getItem(LS_KEY);
+    if(s){
+      let arr=JSON.parse(s);
+      arr=arr.filter(x=>!(x.name==='新股票'&&!(x.code&&String(x.code).trim()))); // 自動清掉誤加的空白股票
+      // 內建資料若有更新的報價,合併進來(保留你的持有價等手動修改)
+      const byCode={}; DEFAULT_DATA.forEach(d=>{ if(d.code) byCode[String(d.code)]=d; });
+      arr.forEach(x=>{
+        const d=byCode[String(x.code||'')];
+        if(d&&d.Jdate&&(!x.Jdate||d.Jdate>x.Jdate)){
+          for(const k of ['J','Jdate','cheap','divYldAll','divYldEarn','avgYld5']) if(d[k]!=null) x[k]=d[k];
+        }
+      });
+      // 內建資料有新股票(如後來加入的候選)→ 補進你的清單
+      DEFAULT_DATA.forEach(d=>{
+        if(d.code && !arr.some(x=>String(x.code||'')===String(d.code))) arr.push(JSON.parse(JSON.stringify(d)));
+      });
+      localStorage.setItem(LS_KEY,JSON.stringify(arr));
+      return arr;
+    }
+  }catch(e){}
+  return JSON.parse(JSON.stringify(DEFAULT_DATA));
+}
+function save(){ localStorage.setItem(LS_KEY, JSON.stringify(stocks)); }
+function loadW(){ try{const s=localStorage.getItem(W_KEY); if(s)return JSON.parse(s);}catch(e){} return {...DEF_W}; }
+function saveW(){ localStorage.setItem(W_KEY, JSON.stringify(W)); }
+
+const z=v=>(v==null||isNaN(v))?0:+v;
+const nn=v=>(v==null||v===''||isNaN(v))?null:+v;
+function interp(v,pts){
+  if(v==null||!isFinite(v))return null;
+  if(v<=pts[0][0])return pts[0][1];
+  for(let i=1;i<pts.length;i++){ if(v<=pts[i][0]){const a=pts[i-1],b=pts[i];return a[1]+(v-a[0])/(b[0]-a[0])*(b[1]-a[1]);} }
+  return pts[pts.length-1][1];
+}
+
+// ── 市場溫度計 v2:溫度(條件)×趨勢燈(引信)雙軸 ──
+function gaugeZone(t){ return t<25?'cold':t<50?'mild':t<75?'warm':'hot'; }
+const TREND_TXT={intact:'趨勢完好',weak:'趨勢轉弱',broken:'趨勢破壞'};
+const STANCE={
+  cold:{name:'低溫(悲觀期)',cheapMin:0.85,totalMin:60,desc:'進攻檔:門檻放寬(便宜度≥0.85、總分≥60)。悲觀期是撿貨期。'},
+  mild:{name:'回溫(懷疑期)',cheapMin:0.95,totalMin:65,desc:'中性檔:預設門檻(便宜度≥0.95、總分≥65)。'},
+  warm:{name:'偏熱(樂觀期)',cheapMin:1.05,totalMin:70,desc:'保守檔:門檻收緊(便宜度≥1.05、總分≥70),新資金限配息+防禦雙高。'},
+  hot:{name:'過熱(亢奮期)',cheapMin:null,totalMin:null,desc:''}
+};
+const HOT_DESC={
+  intact:'亢奮而未破:溫度是「條件」不是「時點」——趨勢未破前不逃也不追。停發一般買進;僅留「嚴選門」:便宜度≥1.1 且總分≥75 且填息率≥0.6 才亮買進(嚴選)。續領息、備現金。',
+  weak:'見頂疑慮:趨勢轉弱(跌破60日線或距高點>8%)。停發所有買進;「貴且填息差」的持股亮減碼燈。',
+  broken:'防禦執行:指數跌破200日線。全面防禦——便宜度<0.8 的持股亮減碼燈,現金優先。'
+};
+function tValOf(med){
+  const credit=Math.max(Math.min(MARKET.medAK??0,0.5),0)*20; // EPS 成長中位數為正才減溫
+  return Math.round(interp(med,[[0.35,100],[0.5,95],[0.7,78],[0.85,60],[1.0,40],[1.2,15],[1.4,0]])-credit);
+}
+function currentGauge(){
+  const cheaps=stocks.map(s=>nn(s.cheap)).filter(v=>v!=null).sort((a,b)=>a-b);
+  const med=cheaps.length?cheaps[Math.floor(cheaps.length/2)]:1;
+  const t_val=tValOf(med);
+  const total=Math.round(((MARKET.t_dev+MARKET.t_lev+t_val)/3)*10)/10;
+  return {total,med,t_val,zone:gaugeZone(total),trend:MARKET.trend||'intact'};
+}
+function renderGauge(){
+  const g=currentGauge_cache||currentGauge(), st=STANCE[g.zone];
+  const desc=g.zone==='hot'?HOT_DESC[g.trend]:st.desc;
+  const el=document.getElementById('gauge');
+  el.className='gauge '+g.zone;
+  el.innerHTML=`<div><div class="big">${g.total.toFixed(0)}<span style="font-size:13px;color:var(--sub)">/100</span></div><div class="gz">${st.name}</div><div class="gz" style="font-size:12px;color:${g.trend==='intact'?'var(--buy)':g.trend==='weak'?'var(--warnc)':'var(--sell)'}">🚦 ${TREND_TXT[g.trend]}${MARKET.distHigh!=null?'(距高點 '+(MARKET.distHigh*100).toFixed(1)+'%)':''}</div></div>
+    <div class="gi">指數乖離(200日) <b>${(MARKET.dev*100).toFixed(1)}%</b> → ${MARKET.t_dev}<br>
+    融資增速 <b>${(MARKET.levChg*100).toFixed(1)}%</b> vs 指數 <b>${MARKET.idx12m!=null?(MARKET.idx12m*100).toFixed(1)+'%':'—'}</b>(超額 ${MARKET.excess!=null?(MARKET.excess*100).toFixed(1)+'%':'—'}) → ${MARKET.t_lev}<br>
+    股票池便宜度中位數 <b>${g.med.toFixed(2)}</b>(EPS成長中位 ${MARKET.medAK!=null?(MARKET.medAK*100).toFixed(1)+'%':'—'}) → ${g.t_val}</div>
+    <div class="stance"><b>目前檔位:</b>${desc}</div>
+    <div class="gi">資料日 ${MARKET.date}</div>`;
+}
+
+function score(s){
+  const G=currentGauge_cache||currentGauge();
+  const type=s.type||'stock', fin=type==='fin', etf=type==='etf';
+  const qs=[s.q1,s.q2,s.q3,s.q4].map(nn);
+  const ttmEPS=qs.every(v=>v==null)?null:qs.reduce((a,b)=>a+z(b),0);
+  const epsNeg=ttmEPS!=null&&ttmEPS<=0;
+  const payout=(nn(s.div1)!=null&&ttmEPS&&ttmEPS>0)?nn(s.div1)/ttmEPS:null;
+  const items=[];
+  function it(p,label,sv,raw,rawFmt,neutralIf){ let sc=sv,neu=false; if(neutralIf||sc==null){sc=5;neu=true;} items.push({p,label,sc,raw,rawFmt,neu}); }
+  it('tax','盈餘現金殖利率', interp(nn(s.divYldEarn),[[0.01,0],[0.03,4],[0.045,8],[0.06,10],[0.075,9],[0.1,6]]), nn(s.divYldEarn),'pct');
+  it('tax','配息率健康', epsNeg?0:interp(payout,[[0.2,1],[0.4,8],[0.7,10],[0.8,9],[1.0,4],[1.2,0]]), payout,'pct', etf);
+  it('tax','連續配息年數', interp(nn(s.divYears),[[0,0],[3,3],[6,6],[10,10]]), nn(s.divYears),'y');
+  it('fill','填息率', interp(nn(s.fillRate),[[0,0],[0.4,3],[0.6,6],[0.8,8],[1,10]]), nn(s.fillRate),'ratio');
+  it('fill','填息速度', interp(nn(s.fillDays),[[10,10],[30,8],[60,6],[120,3],[180,0]]), nn(s.fillDays),'day');
+  it('defense','相對便宜度', interp(nn(s.cheap),[[0.5,0],[0.8,3],[1.0,6],[1.2,9],[1.5,10]]), nn(s.cheap),'x');
+  it('defense','低波動', interp(nn(s.vol),[[0.15,10],[0.25,7],[0.35,4],[0.5,1],[0.7,0]]), nn(s.vol),'pct');
+  it('defense','抗跌(回撤小)', interp(nn(s.mdd),[[-0.7,0],[-0.5,3],[-0.35,7],[-0.2,10]]), nn(s.mdd),'pct');
+  it('quality','ROE', interp(nn(s.roe),[[0,0],[0.08,4],[0.15,7],[0.2,9],[0.25,10]]), nn(s.roe),'pct', fin);
+  it('quality','淨利率', interp(nn(s.AA),[[0,0],[5,3],[10,6],[15,9],[20,10]]), nn(s.AA),'raw%', etf);
+  const pill={tax:[],fill:[],defense:[],quality:[]};
+  items.forEach(x=>pill[x.p].push(x.sc));
+  const sub={}; for(const k in pill) sub[k]=pill[k].length?pill[k].reduce((a,b)=>a+b,0)/pill[k].length*10:0;
+  const wsum=W.tax+W.fill+W.defense+W.quality||1;
+  let total=(sub.tax*W.tax+sub.fill*W.fill+sub.defense*W.defense+sub.quality*W.quality)/wsum;
+  if(!fin&&!etf&&nn(s.roe)!=null&&s.roe<0.08) total=Math.min(total,55);
+  const cheap=nn(s.cheap),fillR=nn(s.fillRate),yE=nn(s.divYldEarn);
+  const alFut=s.AL&&new Date(s.AL)>new Date();
+  const st=STANCE[G.zone], trend=G.trend||'intact';
+  let M;
+  if(epsNeg&&!etf)M='賣出';
+  else if(total<40)M='賣出';
+  else if(G.zone==='hot'){
+    if(trend==='intact'&&cheap!=null&&cheap>=1.1&&total>=75&&fillR!=null&&fillR>=0.6)M='買進(嚴選)';
+    else if((trend==='weak'&&cheap!=null&&cheap<0.55&&fillR!=null&&fillR<0.6)||(trend==='broken'&&cheap!=null&&cheap<0.8))M='減碼';
+    else if(total<55&&cheap!=null&&cheap<0.5)M='減碼(過熱)';
+    else if(total>=65&&cheap!=null&&cheap>=0.95&&(fillR==null||fillR>=0.6))M='觀察(過熱)';
+    else if(yE!=null&&yE>0.04&&alFut)M='配息';
+    else if(total>=55&&cheap!=null&&cheap<0.9)M='觀察(偏貴)';
+    else if(total>=55)M='持有';
+    else M='觀察';
+  }
+  else if(st.cheapMin!=null&&total>=st.totalMin&&cheap!=null&&cheap>=st.cheapMin&&(fillR==null||fillR>=0.6))M='買進';
+  else if(yE!=null&&yE>0.04&&alFut)M='配息';
+  else if(total>=55&&cheap!=null&&cheap<0.9)M='觀察(偏貴)';
+  else if(total>=55)M='持有';
+  else M='觀察';
+  // 價格帶:主用「自身殖利率帶」(同你 Excel 原邏輯:配息÷平均殖利率÷係數)
+  // 便宜=殖利率回到自身5年均的1.3倍、合理=1.0倍、貴=0.9倍;近12月沒配息才退回股利帶(5年均息×16/20/25)
+  const d1=nn(s.div1), d5=nn(s.div5), ay=nn(s.avgYld5);
+  // 前瞻股利:EPS 在成長時,股利大機率跟上——給一半的成長 credit(上限 +50%)
+  let bd=d1;
+  const akv=nn(s.AK);
+  if(d1&&akv!=null&&akv>0) bd=d1*(1+Math.min(akv,0.5)/2);
+  let cheapP=null,fairP=null,expP=null,bandMode=null;
+  if(bd&&ay){ cheapP=bd/(ay*1.3); fairP=bd/ay; expP=bd/(ay*0.9); bandMode='自身殖利率帶'; }
+  else if(d5){ cheapP=d5*16; fairP=d5*20; expP=d5*25; bandMode='股利帶(近12月無配息,以5年均息估)'; }
+  const farBand=(cheapP&&nn(s.J))?(1-cheapP/s.J)>0.6:false; // 便宜價距現價太遠=不在存股射程
+  return {ttmEPS,payout,sub,total,items,M,cheapP,fairP,expP,bandMode,farBand};
+}
+
+const fmt=(v,d=2)=>v==null||!isFinite(v)?'—':v.toLocaleString('zh-TW',{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct=v=>v==null||!isFinite(v)?'—':(v*100).toFixed(1)+'%';
+const cls=v=>v==null?'':(v>=0?'pos':'neg');
+const scCls=v=>v>=65?'hi':v>=55?'mid':v<40?'lo':'';
+const badge=m=>{const map={'買進':'buy','買進(嚴選)':'buy','配息':'div','持有':'hold','賣出':'sell','減碼':'sell','減碼(過熱)':'sell','觀察':'watch','觀察(偏貴)':'watch','觀察(過熱)':'watch'};return `<span class="badge ${map[m]||'watch'}">${m||'—'}</span>`;};
+function rawFmt(v,t){ if(v==null||!isFinite(v))return '—';
+  if(t==='pct')return (v*100).toFixed(1)+'%'; if(t==='x')return v.toFixed(2)+'×';
+  if(t==='y')return v+' 年'; if(t==='ratio')return v.toFixed(2); if(t==='day')return v+' 天';
+  if(t==='raw%')return v.toFixed(1)+'%'; return fmt(v); }
+
+function rowHTML(s,c){
+  const need=s.cheap==null;
+  const band=(c.cheapP!=null&&nn(s.J)!=null)?(s.J<=c.cheapP?'ok':(c.expP!=null&&s.J>=c.expP?'bad':'')):'';
+  return `<td><span class="rowdel" title="刪除這檔">✕</span>${s.name}${need?' <span class="warn" title="尚未抓完整基本面(等額度補),防禦/填息以中性計">待</span>':''}</td>
+    <td>${s.code||''}</td><td>${badge(c.M)}</td>
+    <td class="sc ${scCls(c.total)}">${c.total.toFixed(1)}</td>
+    <td class="pillcell">${c.sub.tax.toFixed(0)}</td><td class="pillcell">${c.sub.fill.toFixed(0)}</td>
+    <td class="pillcell">${c.sub.defense.toFixed(0)}</td><td class="pillcell">${c.sub.quality.toFixed(0)}</td>
+    <td class="${band}" title="${s.Jdate?'報價日 '+s.Jdate:''}">${fmt(nn(s.J))}</td>
+    <td class="${nn(s.cheap)!=null?(s.cheap>=1?'ok':(s.cheap<0.8?'bad':'')):''}">${nn(s.cheap)!=null?s.cheap.toFixed(2):'—'}</td>
+    <td class="${z(s.divYldEarn)>=0.05?'pos':''}">${pct(nn(s.divYldEarn))}</td>
+    <td>${pct(nn(s.divYldAll))}</td>
+    <td title="${c.farBand?'距現價過遠:此股現價不在存股射程內,價格帶僅供參考':''}">${fmt(c.cheapP)}${c.farBand?'<span class="warn">*</span>':''}</td><td>${fmt(c.fairP)}</td><td>${fmt(c.expP)}</td>
+    <td class="${nn(s.fillRate)!=null?(s.fillRate>=0.8?'ok':(s.fillRate<0.5?'bad':'')):''}">${nn(s.fillRate)!=null?(s.fillRate*100).toFixed(0)+'%':'—'}</td>
+    <td>${s.fillDays!=null?s.fillDays:'—'}</td>
+    <td class="${nn(s.roe)!=null?(s.roe>=0.15?'ok':(s.roe<0.08?'bad':'')):''}">${pct(nn(s.roe))}</td>
+    <td>${pct(nn(s.vol))}</td><td class="neg">${pct(nn(s.mdd))}</td>
+    <td>${s.divYears!=null?s.divYears+(s.divYears>=10?'+':''):'—'}</td>
+    <td>${pct(c.payout)}</td>
+    <td class="${cls(c.ttmEPS)}">${fmt(c.ttmEPS)}</td>
+    <td class="${cls(nn(s.AK))}">${pct(nn(s.AK))}</td>
+    <td>${nn(s.AA)!=null?s.AA.toFixed(1)+'%':'—'}</td>
+    <td><input class="holdin" type="number" step="any" value="${s.hold??''}" placeholder="—" title="你的持有成本,直接輸入"></td>`;
+}
+function getVal(r,k){
+  if(k==='name')return r.s.name; if(k==='code')return r.s.code||'';
+  if(k==='M')return r.c.M||''; if(k.startsWith('s:'))return r.c.sub[k.slice(2)];
+  if(['cheapP','fairP','expP','ttmEPS','payout','total'].includes(k))return r.c[k];
+  return nn(r.s[k]);
+}
+function render(){
+  currentGauge_cache=currentGauge(); renderGauge();
+  const rows=stocks.map((s,i)=>({s,i,c:score(s)})).filter(r=>!filter||r.s.name.includes(filter)||String(r.s.code||'').includes(filter));
+  rows.sort((a,b)=>{ let va=getVal(a,sortKey),vb=getVal(b,sortKey);
+    if(typeof va==='string'||typeof vb==='string')return sortDir*String(va??'').localeCompare(String(vb??''),'zh-Hant');
+    va=(va==null||!isFinite(va))?-1e18*sortDir:va; vb=(vb==null||!isFinite(vb))?-1e18*sortDir:vb; return sortDir*(va-vb); });
+  document.querySelector('#tbl tbody').innerHTML=rows.map(({s,i,c})=>{
+    let h=`<tr data-i="${i}" class="${openIdx===i?'open':''}">${rowHTML(s,c)}</tr>`;
+    if(openIdx===i)h+=detailRow(s,i,c); return h; }).join('');
+  document.querySelectorAll('#tbl th').forEach(el=>{el.querySelector('.arr').textContent=el.dataset.k===sortKey?(sortDir>0?'▲':'▼'):'';});
+}
+
+const FIELDS=[['J','股價'],['divEarn1','盈餘現金股利'],['div1','總現金股利'],['div5','5年均現金股利'],
+  ['divYldEarn','盈餘殖利率(小數)'],['divYldAll','總殖利率(小數)'],['cheap','相對便宜度'],['divYears','連續配息年數'],
+  ['fillRate','填息率(0-1)'],['fillDays','填息天數'],['vol','年化波動(小數)'],['mdd','最大回撤(負小數)'],
+  ['roe','ROE(小數)'],['q1','EPS 最舊季'],['q2','EPS'],['q3','EPS'],['q4','EPS 最新季'],
+  ['AK','EPS成長率(小數)'],['AA','淨利率(%)'],['hold','持有價']];
+const PILL_META={tax:['稅效股利',W.tax],fill:['填息力',W.fill],defense:['防禦抗跌',W.defense],quality:['品質',W.quality]};
+function brkHTML(c){
+  let html='<h4>分數組成(權重可調)</h4>', cur='';
+  for(const it of c.items){
+    if(it.p!==cur){ cur=it.p; html+=`<div class="pil"><span>${PILL_META[cur][0]} <span class="w">權重 ${W[cur]}</span></span><span>${c.sub[cur].toFixed(0)}/100</span></div>`; }
+    html+=`<div class="row"><span class="lbl">${it.label} <span style="color:#aab">${rawFmt(it.raw,it.rawFmt)}</span></span><span class="${it.neu?'neu':''}">${it.sc.toFixed(1)}/10${it.neu?'(中性)':''}</span></div>`;
+  }
+  html+=`<div class="tot"><span>總分</span><span class="sc ${scCls(c.total)}">${c.total.toFixed(1)} / 100</span></div>`;
+  return html;
+}
+function detailRow(s,i,c){
+  const inp=`<label>名稱<input type="text" data-f="name" value="${s.name}"></label>`
+    +`<label>代號<input type="text" data-f="code" value="${s.code||''}"></label>`
+    +`<label>類型<select data-f="type"><option value="stock"${(s.type||'stock')==='stock'?' selected':''}>一般</option><option value="fin"${s.type==='fin'?' selected':''}>金融</option><option value="etf"${s.type==='etf'?' selected':''}>ETF</option></select></label>`
+    +FIELDS.map(([k,l])=>`<label>${l}<input type="number" step="any" data-f="${k}" value="${s[k]??''}"></label>`).join('')
+    +`<label>發放日<input type="date" data-f="AL" value="${s.AL||''}"></label>`;
+  return `<tr class="detail"><td colspan="${NCOL}"><div class="panel"><div class="inputs">${inp}</div><div class="brk">${brkHTML(c)}</div><div class="acts"><button class="del" data-del="${i}">刪除這檔</button></div></div></td></tr>`;
+}
+
+// ── 行動卡:點「建議」欄位生成的個股建議 ──
+function adviceHTML(s,c){
+  const J=nn(s.J), cheap=nn(s.cheap), hold=nn(s.hold);
+  const G=currentGauge_cache||currentGauge();
+  const px=v=>v==null||!isFinite(v)?'—':fmt(v,1);
+  const M=c.M, L=[];
+  const distCheap=(c.cheapP&&J)?(J/c.cheapP-1):null;
+  let act='';
+  if(M==='買進(嚴選)'||M==='買進'){
+    act=`低於便宜價 <b>${px(c.cheapP)}</b> 分批買進(現價 ${px(J)});高於貴價 <b>${px(c.expP)}</b> 轉為減碼。`
+      +(M==='買進(嚴選)'?`市場過熱下的嚴選:單批要小、至少分 3 批;溫度計趨勢燈一轉弱就暫停加碼。`:``)
+      +`再評估條件:總分跌破 55、或填息率惡化。`;
+  }else if(M==='配息'){
+    act=`發放日 ${s.AL||'—'}。要拿 8.5% 抵減就持有過除息;除息後盯填息——此股近 ${s.fillN??'—'} 次填息率 ${s.fillRate!=null?(s.fillRate*100).toFixed(0)+'%':'—'}、平均 ${s.fillDays??'—'} 天,不填息=課稅又賠價差。低於 <b>${px(c.cheapP)}</b> 可加碼;高於 <b>${px(c.expP)}</b> 領完這次息就考慮減碼。`;
+  }else if(M==='持有'){
+    act=`續抱領息。加碼價:低於 <b>${px(c.cheapP)}</b>;減碼價:高於 <b>${px(c.expP)}</b>(現價 ${px(J)},距貴價 ${c.expP&&J?((J/c.expP-1)*100).toFixed(0)+'%':'—'})。`;
+  }else if(M==='觀察(偏貴)'){
+    const pullback=(c.cheapP&&J&&J>0)?(1-c.cheapP/J):null;
+    if(pullback!=null&&pullback>0.6){
+      act=`老實說:<b>以存股標準,這檔現價不在射程內</b>——要回到自身殖利率常態需跌 ${(pullback*100).toFixed(0)}%(參考價 ${px(c.cheapP)})。這不是預測會跌到,而是說「用領息的理由買它,現在不成立」。若你想買,那是成長股邏輯,不歸這套系統管;股利若跟著獲利成長,參考價會自動上移。`;
+    }else{
+      act=`列入等待名單,不追價。目標買進價 <b>${px(c.cheapP)}</b>${pullback!=null?`(現價需回檔 ${(Math.max(pullback,0)*100).toFixed(0)}%)`:''};合理價 ${px(c.fairP)}。設個到價提醒,把等待變成策略。`
+        +(pullback!=null&&pullback>0.45?`此價=殖利率回到它自身 5 年常態×1.3 的位置;實際買進訊號看「便宜度回到 1 以上」。`:``);
+    }
+  }else if(M==='觀察(過熱)'){
+    act=`體質達標、被市場溫度壓住:等溫度降到 75 以下,或它自己跌到便宜度≥1.1(約 <b>${px(c.cheapP)}</b> 以下)再進。好公司耐心等,不追。`;
+  }else if(M==='減碼(過熱)'){
+    const aboveExp=(c.expP&&J)?(J/c.expP-1):null;
+    act=`趁強出貨:1–2 個月內分 3 批減碼${aboveExp!=null&&aboveExp>0?`——現價已高於貴價 <b>${px(c.expP)}</b> 約 ${(aboveExp*100).toFixed(0)}%`:``}。不要設「再高一點才賣」的目標價;趨勢燈轉弱就加速出清。${s.AL?`它 ${s.AL} 要配息——別為一次息留住平庸的貴股,息值不值得等,看填息率(${s.fillRate!=null?(s.fillRate*100).toFixed(0)+'%':'—'})。`:''}`;
+  }else if(M==='減碼'){
+    act=`趨勢已${G.trend==='broken'?'破壞(跌破200日線)':'轉弱'}:防禦優先,反彈到 60 日線附近加速執行,保留現金等低溫。`;
+  }else if(M==='賣出'){
+    const why=(c.ttmEPS!=null&&c.ttmEPS<=0)?`近四季合計虧損(EPS ${fmt(c.ttmEPS)})`:`總分 ${c.total.toFixed(0)},低於 40`;
+    act=`出清,不等回本。原因:${why}。回本價是你的心理錨點,不是這門生意的價值;台股沒有證所稅,實現虧損零稅務代價,資金移往高分標的的機會成本更低。`;
+  }else{
+    act=`資料不足,先點列展開補欄位,或按「完整更新」抓齊。`;
+  }
+  L.push(`<div class="advsec"><b class="h">行動</b>${act}</div>`);
+  const weak=c.items.filter(i=>!i.neu&&i.sc<5).sort((a,b)=>a.sc-b.sc).slice(0,3);
+  const strong=c.items.filter(i=>!i.neu&&i.sc>=8).sort((a,b)=>b.sc-a.sc).slice(0,2);
+  let why2=`總分 ${c.total.toFixed(1)};市場 ${G.total.toFixed(0)} 度(${STANCE[G.zone].name}、${TREND_TXT[G.trend]})。`;
+  if(weak.length) why2+=`扣分主因:${weak.map(i=>`${i.label} ${rawFmt(i.raw,i.rawFmt)}`).join('、')}。`;
+  if(strong.length) why2+=`強項:${strong.map(i=>`${i.label} ${rawFmt(i.raw,i.rawFmt)}`).join('、')}。`;
+  L.push(`<div class="advsec"><b class="h">理由</b>${why2}</div>`);
+  if(hold&&J){
+    const pnl=J/hold-1;
+    let p=`持有價 ${fmt(hold)} → 現價 ${fmt(J)},帳面 <span class="${pnl>=0?'pos':'neg'}">${(pnl*100).toFixed(1)}%</span>。`;
+    if((M==='賣出'||M.startsWith('減碼'))&&pnl<0)p+=`別讓「等回本」綁架決策——那是稟賦效應,不是投資理由。`;
+    if((M==='賣出'||M.startsWith('減碼'))&&pnl>0.3)p+=`獲利豐厚:分批了結是把紙上富貴變現。`;
+    L.push(`<div class="advsec"><b class="h">你的部位</b>${p}</div>`);
+  }
+  const yE=nn(s.divYldEarn);
+  if(yE!=null&&yE>0.005){
+    L.push(`<div class="advsec"><b class="h">稅務</b>盈餘配息殖利率 ${(yE*100).toFixed(1)}%(享 8.5% 抵減);記得全戶股利約 94 萬内抵減效益最大,超過只增稅不增抵。</div>`);
+  }
+  return `<div class="advtitle"><span class="close" onclick="document.getElementById('advpop').style.display='none'">✕</span>${badge(M)} ${s.name} <span style="color:var(--sub);font-weight:400">${s.code||''}</span></div>`+L.join('');
+}
+
+// ── FinMind ──
+const iso=t=>new Date(t).toISOString().slice(0,10);
+function fmURL(ds,id,sd){const t=localStorage.getItem('finmind-token')||'';return `https://api.finmindtrade.com/api/v4/data?dataset=${ds}&data_id=${id}&start_date=${sd}`+(t?`&token=${encodeURIComponent(t)}`:'');}
+async function fm(ds,id,sd){const d=await(await fetch(fmURL(ds,id,sd))).json(); if(d.status!==200)throw new Error('quota'); return d.data||[];}
+const Dt=s=>{const d=new Date(s);return isNaN(d)?null:d;};
+function computeJS(price,div,fs,bs){
+  const o={}, now=Date.now(), DAY=864e5;
+  const px=(price||[]).filter(r=>r.close&&Dt(r.date)).map(r=>[Dt(r.date).getTime(),r.close]).sort((a,b)=>a[0]-b[0]);
+  if(px.length){ const last=px[px.length-1]; o.J=last[1]; o.Jdate=iso(last[0]);
+    const c3=px.filter(p=>p[0]>=now-365*3*DAY).map(p=>p[1]);
+    const rets=[]; for(let i=1;i<c3.length;i++)if(c3[i-1])rets.push(c3[i]/c3[i-1]-1);
+    if(rets.length>30){const m=rets.reduce((a,b)=>a+b,0)/rets.length;o.vol=+Math.sqrt(rets.reduce((a,b)=>a+(b-m)*(b-m),0)/rets.length*252).toFixed(4);}
+    let peak=-1,mdd=0; px.forEach(p=>{peak=Math.max(peak,p[1]);if(peak>0)mdd=Math.min(mdd,p[1]/peak-1);}); o.mdd=+mdd.toFixed(4);
+  }
+  const pbefore=t=>{let b=null;for(const p of px){if(p[0]<=t)b=p[1];else break;}return b;};
+  const evs=(div||[]).map(r=>[Dt(r.CashExDividendTradingDate),(+r.CashEarningsDistribution||0),(+r.CashStatutorySurplus||0)]).filter(e=>e[0]&&(e[1]+e[2])>0).map(e=>[e[0].getTime(),e[1],e[2]]).sort((a,b)=>a[0]-b[0]);
+  const Y=365*DAY, tdiv=t=>evs.filter(e=>t-Y<e[0]&&e[0]<=t).reduce((a,e)=>a+e[1]+e[2],0), tearn=t=>evs.filter(e=>t-Y<e[0]&&e[0]<=t).reduce((a,e)=>a+e[1],0);
+  if(px.length&&evs.length){ const last=o.J;
+    o.divEarn1=+tearn(now).toFixed(3); o.div1=+tdiv(now).toFixed(3);
+    o.divYldEarn=+(tearn(now)/last).toFixed(4); o.divYldAll=+(tdiv(now)/last).toFixed(4);
+    o.div5=+(evs.filter(e=>now-e[0]<Y*5).reduce((a,e)=>a+e[1]+e[2],0)/5).toFixed(3);
+    const yrs=new Set(evs.filter(e=>e[0]<=now).map(e=>new Date(e[0]).getFullYear())); let n=0,y=Math.max(...yrs); while(yrs.has(y-n))n++; o.divYears=n;
+    const hy=[]; evs.forEach(e=>{if(now-e[0]<Y*5){const b=pbefore(e[0]);if(b)hy.push(tdiv(e[0])/b);}});
+    if(hy.length){const avg=hy.reduce((a,b)=>a+b,0)/hy.length; if(avg){o.cheap=+((tdiv(now)/last)/avg).toFixed(3); o.avgYld5=+avg.toFixed(4);}}
+    let fh=0,ft=0,fd=[]; evs.slice(-5).forEach(e=>{const b=pbefore(e[0]-DAY);if(!b)return;ft++;const hit=px.find(p=>p[0]>e[0]&&p[0]<=e[0]+180*DAY&&p[1]>=b);if(hit){fh++;fd.push(Math.round((hit[0]-e[0])/DAY));}});
+    if(ft){o.fillRate=+(fh/ft).toFixed(3);o.fillN=ft;} if(fd.length)o.fillDays=Math.round(fd.reduce((a,b)=>a+b,0)/fd.length);
+    const fut=(div||[]).map(r=>r.CashDividendPaymentDate).filter(p=>p&&Dt(p)&&Dt(p).getTime()>now).sort(); if(fut.length)o.AL=fut[0];
+  }
+  const pick=(rows,t)=>(rows||[]).filter(x=>x.type===t).sort((a,b)=>a.date<b.date?-1:1).map(x=>x.value);
+  const eps=pick(fs,'EPS');
+  if(eps.length>=4){const l4=eps.slice(-4);[o.q1,o.q2,o.q3,o.q4]=l4.map(x=>+x.toFixed(2));if(eps.length>=8){const pv=eps.slice(-8,-4).reduce((a,b)=>a+b,0);o.AK=pv>0?+(l4.reduce((a,b)=>a+b,0)/pv-1).toFixed(4):null;}}
+  const ni=pick(fs,'IncomeAfterTaxes'),rev=pick(fs,'Revenue'),ttmNi=ni.length>=4?ni.slice(-4).reduce((a,b)=>a+b,0):null;
+  if(ttmNi&&rev.length>=4&&rev.slice(-4).reduce((a,b)=>a+b,0)>0)o.AA=+(ttmNi/rev.slice(-4).reduce((a,b)=>a+b,0)*100).toFixed(2);
+  const eq=pick(bs,'EquityAttributableToOwnersOfParent'); if(ttmNi&&eq.length&&eq[eq.length-1])o.roe=+(ttmNi/eq[eq.length-1]).toFixed(4);
+  return o;
+}
+async function runFetch(full){
+  const stat=document.getElementById('qstat');
+  const targets=stocks.filter(s=>s.code&&String(s.code).trim());
+  if(!targets.length){stat.textContent='沒有股票有代號。';return;}
+  const now=Date.now(); let done=0,ok=0,quota=false; const fail=[];
+  async function one(s){
+    const id=String(s.code).trim();
+    try{
+      if(full){
+        const [pr,dv,fsx,bsx]=await Promise.all([fm('TaiwanStockPrice',id,iso(now-(365*5+30)*864e5)),fm('TaiwanStockDividend',id,iso(now-365*12*864e5)),fm('TaiwanStockFinancialStatements',id,iso(now-365*3*864e5)),fm('TaiwanStockBalanceSheet',id,iso(now-400*864e5))]);
+        const m=computeJS(pr,dv,fsx,bsx); for(const k in m)if(m[k]!=null)s[k]=m[k];
+      }else{ const pr=await fm('TaiwanStockPrice',id,iso(now-20*864e5)); if(pr.length){s.J=pr[pr.length-1].close;s.Jdate=pr[pr.length-1].date;} }
+      ok++;
+    }catch(e){fail.push(s.name);if(e.message==='quota')quota=true;}
+    done++; stat.textContent=`更新中… ${done}/${targets.length}`; if(done%5===0)save();
+  }
+  const q=[...targets]; await Promise.all(Array.from({length:full?3:5},async()=>{while(q.length)await one(q.shift());}));
+  if(full&&!quota){ // 溫度計 v2 一起刷新(2 次呼叫)
+    try{
+      const [idx,mar]=await Promise.all([fm('TaiwanStockTotalReturnIndex','TAIEX',iso(now-(365*5+30)*864e5)),
+        (async()=>{const t=localStorage.getItem('finmind-token')||'';const u=`https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockTotalMarginPurchaseShortSale&start_date=${iso(now-400*864e5)}`+(t?`&token=${encodeURIComponent(t)}`:'');const d=await(await fetch(u)).json();if(d.status!==200)throw new Error('quota');return d.data||[];})()]);
+      const pxs=idx.map(r=>r.price), last=pxs[pxs.length-1];
+      const ma200=pxs.slice(-200).reduce((a,b)=>a+b,0)/Math.min(200,pxs.length);
+      const ma60=pxs.slice(-60).reduce((a,b)=>a+b,0)/Math.min(60,pxs.length);
+      const dev=last/ma200-1;
+      const idx12m=pxs.length>=252?last/pxs[pxs.length-252]-1:0;
+      const distHigh=last/Math.max(...pxs.slice(-252))-1;
+      const trend=last<ma200?'broken':((last<ma60||distHigh<-0.08)?'weak':'intact');
+      const mp=mar.filter(r=>r.name==='MarginPurchase').sort((a,b)=>a.date<b.date?-1:1);
+      const lev=mp.length>1?mp[mp.length-1].TodayBalance/mp[0].TodayBalance-1:0;
+      const excess=(1+lev)/(1+idx12m)-1;
+      const aks=stocks.map(s=>nn(s.AK)).filter(v=>v!=null).sort((a,b)=>a-b);
+      const medAK=aks.length?aks[Math.floor(aks.length/2)]:0;
+      MARKET={date:idx[idx.length-1].date,dev:+dev.toFixed(4),idx12m:+idx12m.toFixed(4),
+        levChg:+lev.toFixed(4),excess:+excess.toFixed(4),distHigh:+distHigh.toFixed(4),
+        trend,medAK:+medAK.toFixed(4),
+        t_dev:Math.round(interp(dev,[[-0.20,0],[-0.10,20],[0,50],[0.10,75],[0.20,88],[0.35,96],[0.50,100]])),
+        t_lev:Math.round(0.5*interp(excess,[[-0.15,0],[-0.05,30],[0,50],[0.10,80],[0.20,92],[0.35,100]])
+                        +0.5*interp(lev,[[-0.2,0],[0,50],[0.3,100]]))};
+      localStorage.setItem(M_KEY,JSON.stringify(MARKET));
+    }catch(e){}
+  }
+  save(); render();
+  stat.textContent=`已更新 ${ok}/${targets.length}`+(fail.length?`;失敗 ${fail.length} 檔`:'')+(quota?' — FinMind 額度用完,填 token 或稍後再試':'');
+}
+function setToken(){const t=prompt('貼上 FinMind token(免費註冊 finmindtrade.com;留空=清除):',localStorage.getItem('finmind-token')||'');if(t===null)return;t.trim()?localStorage.setItem('finmind-token',t.trim()):localStorage.removeItem('finmind-token');}
+
+// ── 權重滑桿 ──
+function syncW(){ for(const k of ['tax','fill','defense','quality']){document.getElementById('w-'+k).value=W[k];document.getElementById('wv-'+k).textContent=W[k];} }
+function bindW(){
+  for(const k of ['tax','fill','defense','quality']){
+    document.getElementById('w-'+k).addEventListener('input',e=>{W[k]=+e.target.value;document.getElementById('wv-'+k).textContent=W[k];PILL_META[k][1]=W[k];saveW();render();});
+  }
+  document.getElementById('wreset').addEventListener('click',()=>{W={...DEF_W};saveW();syncW();render();});
+}
+
+// ── 事件 ──
+document.querySelector('#tbl thead').addEventListener('click',e=>{const el=e.target.closest('th');if(!el)return;if(sortKey===el.dataset.k)sortDir*=-1;else{sortKey=el.dataset.k;sortDir=-1;}render();});
+document.querySelector('#tbl tbody').addEventListener('click',e=>{
+  if(e.target.closest('.detail')){const del=e.target.closest('[data-del]');if(del&&confirm('確定刪除?')){stocks.splice(+del.dataset.del,1);openIdx=null;save();render();}return;}
+  const tr=e.target.closest('tr[data-i]');if(!tr)return;
+  const rd=e.target.closest('.rowdel');
+  if(rd){ const i=+tr.dataset.i;
+    if(confirm('刪除「'+stocks[i].name+'」?')){ stocks.splice(i,1); openIdx=null; save(); render(); }
+    return; }
+  if(e.target.closest('.holdin'))return; // 點持有價輸入框不展開列
+  const td=e.target.closest('td');
+  if(td&&td.cellIndex===2){ // 點「建議」欄 → 行動卡
+    const s=stocks[+tr.dataset.i];
+    const pop=document.getElementById('advpop');
+    pop.innerHTML=adviceHTML(s,score(s));
+    pop.style.display='block';
+    pop.style.left=Math.max(8,Math.min(e.clientX,window.innerWidth-430))+'px';
+    pop.style.top=Math.max(8,Math.min(e.clientY+12,window.innerHeight-330))+'px';
+    return;
+  }
+  openIdx=openIdx===+tr.dataset.i?null:+tr.dataset.i;render();
+});
+document.addEventListener('click',e=>{
+  const pop=document.getElementById('advpop');
+  if(pop.style.display==='block'&&!e.target.closest('#advpop')){
+    const td=e.target.closest('#tbl tbody td');
+    if(!(td&&td.cellIndex===2)) pop.style.display='none';
+  }
+});
+document.querySelector('#tbl tbody').addEventListener('input',e=>{
+  const hi=e.target.closest('input.holdin');
+  if(hi){ const tr=hi.closest('tr[data-i]'); if(!tr)return;
+    stocks[+tr.dataset.i].hold = hi.value===''?null:+hi.value; save(); return; }
+  const inp=e.target.closest('input[data-f],select[data-f]');if(!inp||openIdx==null)return;
+  const f=inp.dataset.f; stocks[openIdx][f]=(f==='name'||f==='AL'||f==='code'||f==='type')?(inp.value||null):(inp.value===''?null:+inp.value); save();
+  const c=score(stocks[openIdx]); const tr=document.querySelector(`tr[data-i="${openIdx}"]`); if(tr)tr.innerHTML=rowHTML(stocks[openIdx],c);
+  const brk=document.querySelector('.brk'); if(brk)brk.innerHTML=brkHTML(c);
+});
+document.getElementById('q').addEventListener('input',e=>{filter=e.target.value.trim();render();});
+document.getElementById('quote').addEventListener('click',()=>runFetch(false));
+document.getElementById('full').addEventListener('click',()=>runFetch(true));
+document.getElementById('tok').addEventListener('click',setToken);
+async function addStock(){
+  const code=(prompt('輸入股票代號(例:2330),名稱與資料會自動帶入:')||'').trim();
+  if(!code) return;
+  const dup=stocks.findIndex(s=>String(s.code||'').trim()===code);
+  if(dup>=0){ alert('已在清單裡:'+stocks[dup].name+'('+code+')'); return; }
+  const stat=document.getElementById('qstat');
+  stat.textContent=`新增 ${code}:抓取名稱與基本面…`;
+  const now=Date.now();
+  const s={name:code, code:code, type:'stock'};
+  const rs=await Promise.allSettled([
+    fm('TaiwanStockInfo',code,iso(now-30*864e5)),
+    fm('TaiwanStockPrice',code,iso(now-(365*5+30)*864e5)),
+    fm('TaiwanStockDividend',code,iso(now-365*12*864e5)),
+    fm('TaiwanStockFinancialStatements',code,iso(now-365*3*864e5)),
+    fm('TaiwanStockBalanceSheet',code,iso(now-400*864e5))
+  ]);
+  const [info,pr,dv,fsx,bsx]=rs.map(r=>r.status==='fulfilled'?r.value:null);
+  if(info&&info.length){
+    const o=info[info.length-1];
+    s.name=o.stock_name||o.name||code;
+    const ic=String(o.industry_category||'');
+    if(/ETF|ETN|指數/i.test(ic)) s.type='etf';
+    else if(/金融|證券|保險|票券/.test(ic)) s.type='fin';
+  }
+  if(!pr||!pr.length){
+    stat.textContent=`新增失敗:抓不到 ${code} 的資料——代號可能打錯,或 FinMind 額度用完(整點重置後再試一次)。`;
+    return;
+  }
+  const m=computeJS(pr,dv||[],fsx||[],bsx||[]);
+  for(const k in m) if(m[k]!=null) s[k]=m[k];
+  stocks.unshift(s); openIdx=null; save(); render();
+  const tr=[...document.querySelectorAll('#tbl tbody tr[data-i]')].find(r=>+r.dataset.i===0);
+  if(tr){ tr.scrollIntoView({block:'center'}); tr.style.outline='2px solid #0a7d43'; setTimeout(()=>{tr.style.outline='';},2500); }
+  stat.textContent=`已新增 ${s.name}(${code})`+((dv&&fsx&&bsx)?'':',部分資料未抓到(額度限制),稍後可按「完整更新」補齊');
+}
+document.getElementById('add').addEventListener('click',addStock);
+document.getElementById('reset').addEventListener('click',()=>{if(confirm('會覆蓋你的修改,還原成內建資料。確定?')){stocks=JSON.parse(JSON.stringify(DEFAULT_DATA));openIdx=null;save();render();}});
+document.getElementById('export').addEventListener('click',()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(stocks,null,1)],{type:'application/json'}));a.download='存股評分.json';a.click();});
+syncW(); bindW(); render();
+</script>
+</body>
+</html>
