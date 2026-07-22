@@ -198,19 +198,23 @@ const DEF_W={tax:30,fill:20,defense:30,quality:20};
 const NCOL=26;
 
 // ── 快取驗證:欄位、型別、有限數值(NaN/Infinity/字串一律退回 null 或預設) ──
-const NUMF=['J','div1','div5','divEarn1','divYldEarn','divYldAll','avgYld5','cheap','divYears','fillRate','fillN','fillDays','vol','mdd','roe','q1','q2','q3','q4','AK','AA','hold','E','revYoY','T','Y','U','AB','AC','Z'];
-const STRF=['name','code','type','Jdate','exDate','lastBuyDate','payDate'];
+const NUMF=['J','div1','div5','divEarn1','divYldEarn','divYldAll','avgYld5','cheap','divYears','fillRate','fillN','fillDays','vol','mdd','roe','q1','q2','q3','q4','AK','AA','hold','E','revYoY','T','Y','U','AB','AC','Z','epsFallbackCount'];
+const STRF=['name','code','type','Jdate','exDate','lastBuyDate','payDate','q1Period','q2Period','q3Period','q4Period','epsUpdatedAt','epsGrowthLabel'];
+const BOOLF=['q1Fallback','q2Fallback','q3Fallback','q4Fallback','epsInsufficient']; // EPS 來源布林旗標
 function sanitizeStock(x){
   if(!x||typeof x!=='object') return null;
   const o={};
   for(const k of STRF){ if(x[k]!=null && x[k]!=='') o[k]=String(x[k]); }
   if(o.payDate==null && x.AL!=null && x.AL!=='') o.payDate=String(x.AL);   // 舊欄位 AL(發放日)遷移為 payDate
   for(const k of NUMF){ if(k in x){ const v=x[k]; if(v==null||v===''){o[k]=null;} else { const n=+v; o[k]=isFinite(n)?n:null; } } }
+  for(const k of BOOLF){ if(k in x) o[k]=!!x[k]; }
   if(o.type && !['stock','fin','etf'].includes(o.type)) o.type='stock';
   if(!(o.code&&o.code.trim()) && !(o.name&&o.name.trim())) return null;    // 空列丟棄
   if(o.name==='新股票' && !(o.code&&o.code.trim())) return null;           // 誤加的空白股
   return o;
 }
+// computeJS 產出的 EPS 來源欄位(含刻意的 null AK / false fallback)須整批落地
+const EPS_KEYS=['q1','q2','q3','q4','q1Period','q2Period','q3Period','q4Period','q1Fallback','q2Fallback','q3Fallback','q4Fallback','epsFallbackCount','epsUpdatedAt','ttmEPS','AK','epsGrowthLabel','epsInsufficient'];
 function sanitizeArr(a){ return Array.isArray(a) ? a.map(sanitizeStock).filter(Boolean) : null; }
 function loadDeleted(){ try{const s=localStorage.getItem(DEL_KEY); if(s){const a=JSON.parse(s); if(Array.isArray(a)) return a.map(String);}}catch(e){} return []; }
 function saveDeleted(){ try{localStorage.setItem(DEL_KEY, JSON.stringify(deletedCodes));}catch(e){} }
@@ -368,7 +372,8 @@ function score(s){
   const ds=divState(s);
   const st=STANCE[G.zone], trend=G.trend||'intact';
   // ── 訊號(第一階段暫時降強度) ──
-  const dataInsufficient = ttmEPS==null || cheap==null;              // 缺關鍵 EPS 或估值 → 不產生買/賣/減碼
+  // 資料不足只在真的組不出四季(今年與去年同期都缺)或缺估值時成立;正常「沿用去年同期」不算資料不足
+  const dataInsufficient = s.epsInsufficient===true || ttmEPS==null || cheap==null;
   const qNeg=qs.filter(v=>v!=null&&v<0).length;
   const persistentLoss = ttmEPS!=null && ttmEPS<0 && (qNeg>=3 || (z(s.q4)<0 && z(s.q3)<0)); // 近四季持續虧損
   const roeBad = nn(s.roe)!=null && s.roe<0;                          // 淨值報酬為負=品質惡化
@@ -402,7 +407,8 @@ function score(s){
   // 前瞻股利:EPS 在成長時,股利大機率跟上——給一半的成長 credit(上限 +50%)
   let bd=d1;
   const akv=nn(s.AK);
-  if(d1&&akv!=null&&akv>0) bd=d1*(1+Math.min(akv,0.5)/2);
+  // 只有「有效且非極端」的成長率(≤300%,排除低基期/轉盈虧)才給價格帶成長加成;極端%禁入
+  if(d1&&akv!=null&&akv>0&&akv<=3) bd=d1*(1+Math.min(akv,0.5)/2);
   let cheapP=null,fairP=null,expP=null,bandMode=null;
   if(bd&&ay){ cheapP=bd/(ay*1.3); fairP=bd/ay; expP=bd/(ay*0.9); bandMode='自身殖利率帶'; }
   else if(d5){ cheapP=d5*16; fairP=d5*20; expP=d5*25; bandMode='股利帶(近12月無配息,以5年均息估)'; }
@@ -420,8 +426,21 @@ function rawFmt(v,t){ if(v==null||!isFinite(v))return '—';
   if(t==='y')return v+' 年'; if(t==='ratio')return v.toFixed(2); if(t==='day')return v+' 天';
   if(t==='raw%')return v.toFixed(1)+'%'; return fmt(v); }
 
+// EPS 來源提示:hover 看每季來源;沿用去年同期不算錯,只透明標示新鮮度
+function epsInfo(s,c){
+  if(s.epsInsufficient) return {badge:' <span class="warn" title="今年與去年同期都缺,或無法組成四季">資料不足</span>', title:'EPS 資料不足'};
+  const per=[s.q1Period,s.q2Period,s.q3Period,s.q4Period];
+  if(!per[0]) return {badge:'', title:'近四季EPS '+fmt(c.ttmEPS)+'(來源明細需按「完整更新」取得)'};
+  const fb=[s.q1Fallback,s.q2Fallback,s.q3Fallback,s.q4Fallback], val=[s.q1,s.q2,s.q3,s.q4];
+  const fbN=s.epsFallbackCount!=null?s.epsFallbackCount:fb.filter(Boolean).length, freshN=4-fbN;
+  const lines=[0,1,2,3].map(i=>'Q'+(i+1)+' '+per[i]+(fb[i]?'(去年同期)':'(最新)')+' '+fmt(val[i],2));
+  const title='近四季EPS '+fmt(c.ttmEPS)+' · '+freshN+'季最新＋'+fbN+'季去年同期 · '+lines.join(' · ')+(s.epsUpdatedAt?' · 資料截至 '+s.epsUpdatedAt:'');
+  const badge=fbN>0?' <span class="warn" title="'+freshN+'季最新＋'+fbN+'季去年同期(沿用非錯誤,僅新鮮度提示)">'+freshN+'新+'+fbN+'舊</span>':'';
+  return {badge, title};
+}
 function rowHTML(s,c){
   const need=s.cheap==null;
+  const ei=epsInfo(s,c);
   const band=(c.cheapP!=null&&nn(s.J)!=null)?(s.J<=c.cheapP?'ok':(c.expP!=null&&s.J>=c.expP?'bad':'')):'';
   return `<td><span class="rowdel" title="刪除這檔">✕</span>${s.name}${need?' <span class="warn" title="尚未抓完整基本面(等額度補),防禦/填息以中性計">待</span>':''}</td>
     <td>${s.code||''}</td><td>${badge(c.M)}</td>
@@ -439,8 +458,8 @@ function rowHTML(s,c){
     <td>${pct(nn(s.vol))}</td><td class="neg">${pct(nn(s.mdd))}</td>
     <td>${s.divYears!=null?s.divYears+(s.divYears>=10?'+':''):'—'}</td>
     <td>${pct(c.payout)}</td>
-    <td class="${cls(c.ttmEPS)}">${fmt(c.ttmEPS)}</td>
-    <td class="${cls(nn(s.AK))}">${pct(nn(s.AK))}</td>
+    <td class="${cls(c.ttmEPS)}" title="${ei.title}">${fmt(c.ttmEPS)}${ei.badge}</td>
+    <td class="${cls(nn(s.AK))}" title="${s.epsGrowthLabel||''}">${nn(s.AK)!=null?pct(nn(s.AK)):(s.epsGrowthLabel||'—')}</td>
     <td>${nn(s.AA)!=null?s.AA.toFixed(1)+'%':'—'}</td>
     <td><input class="holdin" type="number" step="any" value="${s.hold??''}" placeholder="—" title="你的持有成本,直接輸入"></td>`;
 }
@@ -485,7 +504,8 @@ function detailRow(s,i,c){
     +`<label>除息日<input type="date" data-f="exDate" value="${s.exDate||''}"></label>`
     +`<label>最後買進日<input type="date" data-f="lastBuyDate" value="${s.lastBuyDate||''}"></label>`
     +`<label>發放日<input type="date" data-f="payDate" value="${s.payDate||''}"></label>`;
-  return `<tr class="detail"><td colspan="${NCOL}"><div class="panel"><div class="inputs">${inp}</div><div class="brk">${brkHTML(c)}</div><div class="acts"><button class="del" data-del="${i}">刪除這檔</button></div></div></td></tr>`;
+  const retry=s.code?`<button data-retry="${i}"${s.epsInsufficient?' class="primary"':''}>重試更新這檔</button>`:'';
+  return `<tr class="detail"><td colspan="${NCOL}"><div class="panel"><div class="inputs">${inp}</div><div class="brk">${brkHTML(c)}</div><div class="acts"><button class="del" data-del="${i}">刪除這檔</button>${retry}</div></div></td></tr>`;
 }
 
 // ── 行動卡:點「建議」欄位生成的個股建議 ──
@@ -528,7 +548,7 @@ function adviceHTML(s,c){
   }else if(M==='排除'){
     act=`總分 ${c.total.toFixed(0)}(低於 40):列為<b>排除/不加碼</b>——這不是叫你賣出,而是新資金別投入。若已持有,續抱觀察體質是否回升;要出場請等出現「基本面賣出」訊號(持續虧損、ROE 轉負、停配),別因低分就殺出。`;
   }else if(M==='資料不足'){
-    act=`關鍵資料不足(缺近四季 EPS 或估值),<b>暫不產生買/賣/減碼</b>。先點列展開補欄位,或按「完整更新」抓齊再判斷。`;
+    act=`關鍵資料不足(四季 EPS 今年與去年同期都組不齊,或缺估值),<b>暫不產生買/賣/減碼</b>。展開該列按「重試更新這檔」或上方「完整更新」抓齊再判斷。`;
   }else{
     act=`資料不足,先點列展開補欄位,或按「完整更新」抓齊。`;
   }
@@ -570,6 +590,48 @@ function caFactor(code,dateStr){ // 把 dateStr 當期的每股數值 ÷ 此值 
   let f=1; for(const a of acts){ const ad=Dt(a.date); if(ad&&t.getTime()<ad.getTime()) f*=(a.factor||1); }
   return f;
 }
+// ── 滾動四季 TTM EPS ──
+// 每個季度槽(Q1..Q4)用當年最新已公布值;尚未公布→沿用去年同期(不需等四季全出)。
+// 保存來源(q?Period)、是否沿用去年(q?Fallback)、新鮮度(epsFallbackCount/epsUpdatedAt);
+// TTM成長率=最新可得TTM ÷ 前一期可比較TTM −1;基期≤0或過低則不給%,改給文字標示,且不進價格帶加成。
+function epsQuarter(dateStr){ const dt=Dt(dateStr); if(!dt)return null; const mo=dt.getMonth()+1; const q=mo<=3?1:mo<=6?2:mo<=9?3:4; return {y:dt.getFullYear(),q,ord:dt.getFullYear()*4+q}; }
+function buildEPS(fs, code){
+  const rows=(fs||[]).filter(x=>x.type==='EPS');
+  const map={}; let latest=null, maxDate=null, dupErr=false;
+  for(const r of rows){ const p=epsQuarter(r.date); if(!p) continue; const v=+r.value/caFactor(code,r.date);
+    if(!isFinite(v)) continue;                                              // 非有限數字剔除
+    const key=p.y+'Q'+p.q;
+    if(map[key]!=null && Math.abs(map[key]-v)>1e-6) dupErr=true;            // 同期重複且不一致=期間/順序錯誤
+    map[key]=v;
+    if(!latest||p.ord>latest.ord) latest={y:p.y,q:p.q,ord:p.ord};
+    if(!maxDate||r.date>maxDate) maxDate=r.date;
+  }
+  if(!latest) return {epsInsufficient:true};
+  const Yr=latest.y, Qn=latest.q;
+  const slots=[1,2,3,4].map(qi=>{
+    const pref = qi<=Qn ? Yr : Yr-1;                                        // 今年已到的季用今年,未到的季先用去年
+    let year=pref, val=map[pref+'Q'+qi];
+    if(val==null){ year=pref-1; val=map[year+'Q'+qi]; }                     // 該年缺 → 再往前一年(去年同期)
+    return {qi, year, val, found:val!=null, fallback:(val!=null && year<Yr)};
+  });
+  if(dupErr || slots.some(s=>!s.found)) return {epsInsufficient:true};      // 組不成四槽/期間錯誤 → 資料不足
+  const o={epsInsufficient:false};
+  slots.forEach(s=>{ o['q'+s.qi]=+s.val.toFixed(2); o['q'+s.qi+'Period']=s.year+'Q'+s.qi; o['q'+s.qi+'Fallback']=s.fallback; });
+  o.epsFallbackCount = slots.filter(s=>s.fallback).length;
+  o.epsUpdatedAt = maxDate;
+  o.ttmEPS = +slots.reduce((a,s)=>a+s.val,0).toFixed(2);
+  let prevOK=true, prevSum=0;                                              // 前一期可比較TTM:每槽再往前一年
+  for(const s of slots){ const pv=map[(s.year-1)+'Q'+s.qi]; if(pv==null){prevOK=false;break;} prevSum+=pv; }
+  const ttm=o.ttmEPS; let AK=null, label=null;
+  if(!prevOK) label='比較基期不足';
+  else if(prevSum<=0 && ttm>0) label='由虧轉盈';
+  else if(prevSum>0 && ttm<=0) label='由盈轉虧';
+  else if(prevSum<=0 && ttm<=0) label='基期過低,不適用';
+  else if(prevSum<1.0) label='基期過低,不適用';                            // 基期 TTM<1元 → 低基期放大,%不可靠
+  else { AK=+(ttm/prevSum-1).toFixed(4); if(Math.abs(AK)>3){AK=null; label='基期過低,不適用';} } // 極端%禁入
+  o.AK=AK; o.epsGrowthLabel=label;
+  return o;
+}
 function computeJS(price,div,fs,bs,code){
   const o={}, now=Date.now(), DAY=864e5;
   // 股價序列:公司行動前的價格 ÷factor,消除分割/面額變更/減資的假性跳空(讓波動、回撤、填息判斷連續)
@@ -601,15 +663,39 @@ function computeJS(price,div,fs,bs,code){
     let active=null; for(const r of drows){ const ref=(r.pay||r.ex); if(ref&&ref.getTime()>=now){active=r;break;} }
     if(active){ if(active.ex){o.exDate=iso(active.ex.getTime()); o.lastBuyDate=iso(prevTradingDay(active.ex).getTime());} if(active.pay)o.payDate=iso(active.pay.getTime()); }
   }
-  // EPS:公司行動前的每股盈餘 ÷factor,避免分割前後每股數字混用(國巨案例)
-  const epsRows=(fs||[]).filter(x=>x.type==='EPS').sort((a,b)=>a.date<b.date?-1:1);
-  const eps=epsRows.map(x=> x.value/caFactor(code,x.date));
-  if(eps.length>=4){const l4=eps.slice(-4);[o.q1,o.q2,o.q3,o.q4]=l4.map(x=>+x.toFixed(2));if(eps.length>=8){const pv=eps.slice(-8,-4).reduce((a,b)=>a+b,0);o.AK=pv>0?+(l4.reduce((a,b)=>a+b,0)/pv-1).toFixed(4):null;}}
+  // 滾動四季 TTM EPS(來源/新鮮度/成長率);公司行動前每股值已於 buildEPS 內 ÷factor
+  const epsO=buildEPS(fs, code);
+  for(const k in epsO) o[k]=epsO[k];
   const pick=(rows,t)=>(rows||[]).filter(x=>x.type===t).sort((a,b)=>a.date<b.date?-1:1).map(x=>x.value);
   const ni=pick(fs,'IncomeAfterTaxes'),rev=pick(fs,'Revenue'),ttmNi=ni.length>=4?ni.slice(-4).reduce((a,b)=>a+b,0):null; // 總額,與每股基準無關,不需 factor
   if(ttmNi&&rev.length>=4&&rev.slice(-4).reduce((a,b)=>a+b,0)>0)o.AA=+(ttmNi/rev.slice(-4).reduce((a,b)=>a+b,0)*100).toFixed(2);
   const eq=pick(bs,'EquityAttributableToOwnersOfParent'); if(ttmNi&&eq.length&&eq[eq.length-1])o.roe=+(ttmNi/eq[eq.length-1]).toFixed(4);
   return o;
+}
+// ── 唯一的標準化更新流程:預設股/新增股/單檔/全部/快速更新都走這裡,公式不分岔 ──
+// full=true:抓股價+股利+財報+資產負債→computeJS 全量重算;full=false:只刷股價→recalcFromPrice。
+// 兩者都保留使用者資料(持有價等),只更新基本面/股價/股利/日期。
+async function updateStock(s, full){
+  const id=String(s.code||'').trim(); if(!id) return {ok:false, reason:'no-code'};
+  const now=Date.now();
+  try{
+    if(full){
+      const [pr,dv,fsx,bsx]=await Promise.all([
+        fm('TaiwanStockPrice',id,iso(now-(365*7+30)*864e5)),          // 7 年價格(涵蓋公司行動)
+        fm('TaiwanStockDividend',id,iso(now-365*12*864e5)),
+        fm('TaiwanStockFinancialStatements',id,iso(now-365*5*864e5)), // 5 年財報(供滾動TTM與前一期比較)
+        fm('TaiwanStockBalanceSheet',id,iso(now-400*864e5))]);
+      if(!pr||!pr.length) return {ok:false, reason:'no-price'};
+      const m=computeJS(pr,dv||[],fsx||[],bsx||[],id);
+      for(const k in m) if(m[k]!=null) s[k]=m[k];
+      for(const k of EPS_KEYS) if(k in m) s[k]=m[k];                  // EPS 來源欄位(含 null AK/false fallback)整批落地
+    } else {
+      const pr=await fm('TaiwanStockPrice',id,iso(now-20*864e5));
+      if(!pr||!pr.length) return {ok:false, reason:'no-price'};
+      s.J=+pr[pr.length-1].close/caFactor(id,pr[pr.length-1].date); s.Jdate=pr[pr.length-1].date; recalcFromPrice(s);
+    }
+    return {ok:true, incomplete: s.epsInsufficient===true};
+  }catch(e){ return {ok:false, reason:e.message, quota:e.message==='quota'}; }
 }
 async function runFetch(full){
   const stat=document.getElementById('qstat');
@@ -617,14 +703,8 @@ async function runFetch(full){
   if(!targets.length){stat.textContent='沒有股票有代號。';return;}
   const now=Date.now(); let done=0,ok=0,quota=false; const fail=[];
   async function one(s){
-    const id=String(s.code).trim();
-    try{
-      if(full){
-        const [pr,dv,fsx,bsx]=await Promise.all([fm('TaiwanStockPrice',id,iso(now-(365*5+30)*864e5)),fm('TaiwanStockDividend',id,iso(now-365*12*864e5)),fm('TaiwanStockFinancialStatements',id,iso(now-365*3*864e5)),fm('TaiwanStockBalanceSheet',id,iso(now-400*864e5))]);
-        const m=computeJS(pr,dv,fsx,bsx,id); for(const k in m)if(m[k]!=null)s[k]=m[k];
-      }else{ const pr=await fm('TaiwanStockPrice',id,iso(now-20*864e5)); if(pr.length){s.J=+pr[pr.length-1].close/caFactor(id,pr[pr.length-1].date);s.Jdate=pr[pr.length-1].date; recalcFromPrice(s);} }
-      ok++;
-    }catch(e){fail.push(s.name);if(e.message==='quota')quota=true;}
+    const r=await updateStock(s, full);
+    if(r.ok) ok++; else { fail.push(s.name); if(r.quota) quota=true; }
     done++; stat.textContent=`更新中… ${done}/${targets.length}`; if(done%5===0)save();
   }
   const q=[...targets]; await Promise.all(Array.from({length:full?3:5},async()=>{while(q.length)await one(q.shift());}));
@@ -679,7 +759,9 @@ function bindW(){
 function markDeleted(st){ if(st&&st.code){ const c=String(st.code); if(DEFAULT_DATA.some(d=>String(d.code||'')===c)&&!deletedCodes.includes(c)){ deletedCodes.push(c); saveDeleted(); } } }
 document.querySelector('#tbl thead').addEventListener('click',e=>{const el=e.target.closest('th');if(!el)return;if(sortKey===el.dataset.k)sortDir*=-1;else{sortKey=el.dataset.k;sortDir=-1;}render();});
 document.querySelector('#tbl tbody').addEventListener('click',e=>{
-  if(e.target.closest('.detail')){const del=e.target.closest('[data-del]');if(del&&confirm('確定刪除?')){markDeleted(stocks[+del.dataset.del]);stocks.splice(+del.dataset.del,1);openIdx=null;save();render();}return;}
+  if(e.target.closest('.detail')){
+    const rt=e.target.closest('[data-retry]'); if(rt){ retryUpdate(stocks[+rt.dataset.retry]); return; }
+    const del=e.target.closest('[data-del]');if(del&&confirm('確定刪除?')){markDeleted(stocks[+del.dataset.del]);stocks.splice(+del.dataset.del,1);openIdx=null;save();render();}return;}
   const tr=e.target.closest('tr[data-i]');if(!tr)return;
   const rd=e.target.closest('.rowdel');
   if(rd){ const i=+tr.dataset.i;
@@ -721,41 +803,46 @@ document.getElementById('q').addEventListener('input',e=>{filter=e.target.value.
 document.getElementById('quote').addEventListener('click',()=>runFetch(false));
 document.getElementById('full').addEventListener('click',()=>runFetch(true));
 document.getElementById('tok').addEventListener('click',setToken);
+// 新增股票走與預設股「完全相同」的標準化流程:辨識代號/類型 → updateStock(full) 抓齊
+// 股價、滾動四季 EPS、股利、除息/發放日、5年均息、填息、波動、回撤、ROE、公司行動,全部完成才產生評分。
+async function identifyStock(s){
+  try{ const info=await fm('TaiwanStockInfo',String(s.code),iso(Date.now()-30*864e5));
+    if(info&&info.length){ const o=info[info.length-1]; s.name=o.stock_name||o.name||s.code;
+      const ic=String(o.industry_category||''); if(/ETF|ETN|指數/i.test(ic))s.type='etf'; else if(/金融|證券|保險|票券/.test(ic))s.type='fin'; }
+  }catch(e){}
+}
+async function tryAddStock(s){          // 供新增與「重試更新」共用
+  const stat=document.getElementById('qstat');
+  stat.textContent=`更新 ${s.code}:辨識與抓取完整資料…`;
+  await identifyStock(s);
+  const r=await updateStock(s, true);
+  if(!r.ok){                            // 更新未完成:不加入半殘資料、不用中性分數湊建議、提供重試
+    stat.innerHTML=`更新未完成／資料不足:抓不到 ${s.code}(代號可能打錯或 FinMind 額度用完)。 <button id="addretry" class="primary">重試更新</button>`;
+    const rb=document.getElementById('addretry'); if(rb) rb.onclick=()=>tryAddStock(s);
+    return;
+  }
+  const di=deletedCodes.indexOf(String(s.code)); if(di>=0){ deletedCodes.splice(di,1); saveDeleted(); } // 重新加回被刪的內建股
+  if(!stocks.some(x=>String(x.code||'')===String(s.code))) stocks.unshift(s);
+  openIdx=null; save(); render();
+  const tr=[...document.querySelectorAll('#tbl tbody tr[data-i]')].find(r=>+r.dataset.i===0);
+  if(tr){ tr.scrollIntoView({block:'center'}); tr.style.outline='2px solid #0a7d43'; setTimeout(()=>{tr.style.outline='';},2500); }
+  stat.textContent = r.incomplete
+    ? `已加入 ${s.name}(${s.code}),但四季 EPS 組不齊→顯示「資料不足」、不產生建議;展開該列按「重試更新這檔」補抓。`
+    : `已新增 ${s.name}(${s.code})`;
+}
 async function addStock(){
-  const code=(prompt('輸入股票代號(例:2330),名稱與資料會自動帶入:')||'').trim();
+  const code=(prompt('輸入股票代號(例:2330),名稱與完整資料會自動帶入:')||'').trim();
   if(!code) return;
   const dup=stocks.findIndex(s=>String(s.code||'').trim()===code);
   if(dup>=0){ alert('已在清單裡:'+stocks[dup].name+'('+code+')'); return; }
-  const stat=document.getElementById('qstat');
-  stat.textContent=`新增 ${code}:抓取名稱與基本面…`;
-  const now=Date.now();
-  const s={name:code, code:code, type:'stock'};
-  const rs=await Promise.allSettled([
-    fm('TaiwanStockInfo',code,iso(now-30*864e5)),
-    fm('TaiwanStockPrice',code,iso(now-(365*5+30)*864e5)),
-    fm('TaiwanStockDividend',code,iso(now-365*12*864e5)),
-    fm('TaiwanStockFinancialStatements',code,iso(now-365*3*864e5)),
-    fm('TaiwanStockBalanceSheet',code,iso(now-400*864e5))
-  ]);
-  const [info,pr,dv,fsx,bsx]=rs.map(r=>r.status==='fulfilled'?r.value:null);
-  if(info&&info.length){
-    const o=info[info.length-1];
-    s.name=o.stock_name||o.name||code;
-    const ic=String(o.industry_category||'');
-    if(/ETF|ETN|指數/i.test(ic)) s.type='etf';
-    else if(/金融|證券|保險|票券/.test(ic)) s.type='fin';
-  }
-  if(!pr||!pr.length){
-    stat.textContent=`新增失敗:抓不到 ${code} 的資料——代號可能打錯,或 FinMind 額度用完(整點重置後再試一次)。`;
-    return;
-  }
-  const m=computeJS(pr,dv||[],fsx||[],bsx||[],code);
-  for(const k in m) if(m[k]!=null) s[k]=m[k];
-  const di=deletedCodes.indexOf(String(code)); if(di>=0){ deletedCodes.splice(di,1); saveDeleted(); } // 重新加回被刪的內建股
-  stocks.unshift(s); openIdx=null; save(); render();
-  const tr=[...document.querySelectorAll('#tbl tbody tr[data-i]')].find(r=>+r.dataset.i===0);
-  if(tr){ tr.scrollIntoView({block:'center'}); tr.style.outline='2px solid #0a7d43'; setTimeout(()=>{tr.style.outline='';},2500); }
-  stat.textContent=`已新增 ${s.name}(${code})`+((dv&&fsx&&bsx)?'':',部分資料未抓到(額度限制),稍後可按「完整更新」補齊');
+  await tryAddStock({name:code, code:code, type:'stock'});
+}
+// 單檔重試:走同一條 updateStock,保留使用者資料(持有價),不影響固定市場母體
+async function retryUpdate(s){
+  const stat=document.getElementById('qstat'); stat.textContent=`重試更新 ${s.name}…`;
+  const r=await updateStock(s, true); save(); render();
+  stat.textContent = !r.ok ? `重試失敗:${s.name}(${r.quota?'FinMind 額度用完':'抓不到資料'})`
+    : (r.incomplete ? `${s.name} 仍資料不足(四季 EPS 組不齊)` : `${s.name} 已更新完成`);
 }
 document.getElementById('add').addEventListener('click',addStock);
 document.getElementById('reset').addEventListener('click',()=>{if(confirm('會覆蓋你的修改,還原成內建資料。確定?')){stocks=JSON.parse(JSON.stringify(DEFAULT_DATA));deletedCodes=[];saveDeleted();openIdx=null;save();render();}});
