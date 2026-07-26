@@ -67,6 +67,7 @@ footer{margin-top:36px;font-size:11.5px;color:var(--sub);line-height:1.7;border-
 </header>
 
 <div class="headline" id="headline"><span class="tag">今日一句話</span><span id="headtxt"></span></div>
+<div id="livestat" style="font-size:11.5px;color:var(--sub);margin:-16px 0 18px;padding:0 4px"></div>
 
 <div id="alerts"></div>
 
@@ -96,56 +97,138 @@ const BRIEF = /*DATA*/{"date": "2026-07-22", "headline": "週三:台股兩日強
 
 const fmt=(v,d)=>v==null?'—':(+v).toLocaleString('zh-TW',{minimumFractionDigits:d??0,maximumFractionDigits:d??2});
 const pc=v=>v==null?'':((v>=0?'+':'')+(v*100).toFixed(2)+'%');
+const pcs=v=>v==null?'—':((v>=0?'+':'')+(v*100).toFixed(1)+'%');
 const cls=v=>v==null?'fl':(v>0.0001?'up':v<-0.0001?'dn':'fl');
 
-document.getElementById('bdate').textContent=BRIEF.date+'(台北時間 09:00)';
-document.getElementById('headtxt').textContent=BRIEF.headline;
-
-// 警報
-const alertsEl=document.getElementById('alerts');
-if(BRIEF.alerts&&BRIEF.alerts.length){
-  alertsEl.innerHTML='<div class="alerts">'+BRIEF.alerts.map(a=>`<div class="alert ${a.level==='warn'?'warn':''}">${a.level==='warn'?'🟡':'🔴'} ${a.txt}</div>`).join('')+'</div>';
-}
-
-// 燈板
-const tiles=document.getElementById('tiles');
-tiles.innerHTML=BRIEF.groups.map(g=>`<h2 style="margin-top:18px">${g.name}</h2><div class="grid">`+
-  g.items.map(t=>`<div class="tile ${t.light==='bad'?'bad':''}">
-    <div class="k"><span class="dot ${t.light}"></span>${t.label}</div>
-    <div class="v">${t.display??fmt(t.value)}</div>
-    <div class="d ${cls(t.chg)}">${t.sub??pc(t.chg)}</div>
-  </div>`).join('')+'</div>').join('');
-
-// 成員卡
-document.getElementById('members').innerHTML=BRIEF.members.map(m=>{
-  const acc=m.acc&&m.acc.total>0?`<b>${Math.round(m.acc.hit/m.acc.total*100)}%</b> <span style="color:var(--sub)">(${m.acc.hit}/${m.acc.total})</span>`
-    :`<span style="color:var(--sub)">準確率:樣本累積中${m.acc&&m.acc.total===0?'':''}</span>`;
-  return `<div class="mem">
-    <div class="ava" style="background:${m.color}">${m.initial}<img src="avatars/${m.id}.png" alt="${m.name}" onerror="this.remove()"></div>
-    <div style="flex:1">
-      <div class="who">${m.name}<span class="en">${m.en}</span></div>
+// ===== 統一渲染(可傳入 BRIEF 或即時 merged)=====
+const ICONS={bull:['🟢','偏多情境'],base:['⚪','基準情境'],bear:['🔴','偏空情境']};
+function renderAll(D){
+  document.getElementById('bdate').textContent=D.date+'(台北時間 09:00)';
+  document.getElementById('headtxt').textContent=D.headline;
+  const alertsEl=document.getElementById('alerts');
+  alertsEl.innerHTML=(D.alerts&&D.alerts.length)?'<div class="alerts">'+D.alerts.map(a=>`<div class="alert ${a.level==='warn'?'warn':''}">${a.level==='warn'?'🟡':'🔴'} ${a.txt}</div>`).join('')+'</div>':'';
+  document.getElementById('tiles').innerHTML=D.groups.map(g=>`<h2 style="margin-top:18px">${g.name}</h2><div class="grid">`+
+    g.items.map(t=>`<div class="tile ${t.light==='bad'?'bad':''}">
+      <div class="k"><span class="dot ${t.light}"></span>${t.label}</div>
+      <div class="v">${t.display??fmt(t.value)}</div>
+      <div class="d ${cls(t.chg)}">${t.sub??pc(t.chg)}</div></div>`).join('')+'</div>').join('');
+  document.getElementById('members').innerHTML=D.members.map(m=>{
+    const acc=m.acc&&m.acc.total>0?`<b>${Math.round(m.acc.hit/m.acc.total*100)}%</b> <span style="color:var(--sub)">(${m.acc.hit}/${m.acc.total})</span>`
+      :`<span style="color:var(--sub)">準確率:樣本累積中</span>`;
+    return `<div class="mem">
+      <div class="ava" style="background:${m.color}">${m.initial}<img src="avatars/${m.id}.png" alt="${m.name}" onerror="this.remove()"></div>
+      <div style="flex:1"><div class="who">${m.name}<span class="en">${m.en}</span></div>
       <div class="beat">盯盤:${m.beat}</div>
       <div class="accy">${m.acc&&m.acc.total>0?'準確率 ':''}${acc}</div>
-      <div class="say">${m.today}</div>
-    </div></div>`;
-}).join('');
+      <div class="say">${m.today}</div></div></div>`;
+  }).join('');
+  document.getElementById('outlook').innerHTML=['bull','base','bear'].map(k=>{
+    const s=D.outlook[k]; if(!s)return '';
+    return `<div class="sc"><h3>${ICONS[k][0]} ${ICONS[k][1]}${s.p?`<span style="color:var(--sub);font-weight:400;font-size:11.5px">機率感:${s.p}</span>`:''}</h3>
+      <p>${s.txt}</p><div class="trig">觸發觀察:${s.trigger}</div></div>`;
+  }).join('');
+  const nameOf=id=>{const m=D.members.find(x=>x.id===id);return m?m.name:id;};
+  document.querySelector('#predtbl tbody').innerHTML=D.predictions.map(p=>`<tr>
+    <td>${nameOf(p.member)}</td><td>${p.claim}</td><td>${p.due}</td>
+    <td><span class="badge ${p.status}">${p.status==='pending'?'觀察中':p.status==='hit'?'✓ 命中':'✗ 未中'}</span></td></tr>`).join('');
+  document.getElementById('hist').innerHTML=(D.history||[]).map(h=>`<div>▸ ${h.date} — ${h.headline}</div>`).join('');
+}
 
-// 週展望
-const ICONS={bull:['🟢','偏多情境'],base:['⚪','基準情境'],bear:['🔴','偏空情境']};
-document.getElementById('outlook').innerHTML=['bull','base','bear'].map(k=>{
-  const s=BRIEF.outlook[k]; if(!s)return '';
-  return `<div class="sc"><h3>${ICONS[k][0]} ${ICONS[k][1]}${s.p?`<span style="color:var(--sub);font-weight:400;font-size:11.5px">機率感:${s.p}</span>`:''}</h3>
-    <p>${s.txt}</p><div class="trig">觸發觀察:${s.trigger}</div></div>`;
-}).join('');
-
-// 預測記錄簿
-const nameOf=id=>{const m=BRIEF.members.find(x=>x.id===id);return m?m.name:id;};
-document.querySelector('#predtbl tbody').innerHTML=BRIEF.predictions.map(p=>`<tr>
-  <td>${nameOf(p.member)}</td><td>${p.claim}</td><td>${p.due}</td>
-  <td><span class="badge ${p.status}">${p.status==='pending'?'觀察中':p.status==='hit'?'✓ 命中':'✗ 未中'}</span></td></tr>`).join('');
-
-// 歷史
-document.getElementById('hist').innerHTML=(BRIEF.history||[]).map(h=>`<div>▸ ${h.date} — ${h.headline}</div>`).join('');
+// ===== 即時計算層 =====
+function interp(v,pts){ if(v==null||!isFinite(v))return null;
+  if(v<=pts[0][0])return pts[0][1];
+  for(var i=1;i<pts.length;i++){ if(v<=pts[i][0]){var a=pts[i-1],b=pts[i];return a[1]+(v-a[0])/(b[0]-a[0])*(b[1]-a[1]);} }
+  return pts[pts.length-1][1]; }
+function computeMarket(idx,mar,fx,cg,snapMed){
+  var L={}, px=idx.map(r=>r.price), last=px[px.length-1];
+  var ma=n=>px.slice(-n).reduce((a,b)=>a+b,0)/Math.min(n,px.length);
+  var ma60=ma(60),ma200=ma(200),hi=Math.max.apply(null,px.slice(-252));
+  L.idx=last; L.d1=px.length>1?last/px[px.length-2]-1:0;
+  L.dev=last/ma200-1; L.distHigh=last/hi-1; L.vs60=last/ma60-1;
+  L.idx12m=px.length>=252?last/px[px.length-252]-1:0;
+  L.trend=last<ma200?'broken':((last<ma60||L.distHigh<-0.08)?'weak':'intact');
+  L.trendTxt={intact:'完好',weak:'轉弱',broken:'破壞'}[L.trend];
+  var mp=mar.filter(r=>r.name==='MarginPurchase').sort((a,b)=>a.date<b.date?-1:1);
+  var bal=mp.map(r=>r.TodayBalance), peak=Math.max.apply(null,bal);
+  L.marPeak=bal[bal.length-1]/peak-1; L.mar12=bal.length>1?bal[bal.length-1]/bal[0]-1:0;
+  L.excess=(1+L.mar12)/(1+L.idx12m)-1;
+  var fxr=fx.filter(r=>r.spot_buy>0).map(r=>(r.spot_buy+r.spot_sell)/2);
+  L.fx=fxr[fxr.length-1]; L.fx5=fxr.length>5?L.fx/fxr[fxr.length-6]-1:0;
+  L.btc=cg.bitcoin.usd; L.btcC=cg.bitcoin.usd_24h_change/100;
+  L.eth=cg.ethereum.usd; L.ethC=cg.ethereum.usd_24h_change/100;
+  L.t_dev=Math.round(interp(L.dev,[[-0.20,0],[-0.10,20],[0,50],[0.10,75],[0.20,88],[0.35,96],[0.50,100]]));
+  L.t_lev=Math.round(0.5*interp(L.excess,[[-0.15,0],[-0.05,30],[0,50],[0.10,80],[0.20,92],[0.35,100]])+0.5*interp(L.mar12,[[-0.2,0],[0,50],[0.3,100]]));
+  L.medCheap=snapMed; L.t_val=Math.round(interp(snapMed,[[0.35,100],[0.5,95],[0.7,78],[0.85,60],[1.0,40],[1.2,15],[1.4,0]]));
+  L.total=Math.round(((L.t_dev+L.t_lev+L.t_val)/3)*10)/10;
+  L.zone=L.total<25?'低溫(悲觀期)':L.total<50?'回溫(懷疑期)':L.total<75?'偏熱(樂觀期)':'過熱(亢奮期)';
+  return L;
+}
+const RULES={
+ marks:L=>L.trend==='broken'?`趨勢燈破壞:指數跌破200日線,溫度${L.total}的過熱正在卸壓——摔多痛看溫度,但別在第一根接刀。`
+   :L.total>=75?`溫度${L.total}仍在過熱區(乖離200日線${pcs(L.dev)}、趨勢${L.trendTxt})。反彈不是解除警報的理由。`
+   :L.total>=50?`溫度${L.total}(偏熱):離中點近了,門檻收緊但還沒到撿貨區。`
+   :L.total>=25?`溫度${L.total}(懷疑期):鐘擺過了中點,便宜貨開始浮現。`
+   :`溫度${L.total}(悲觀期):別人恐懼時該貪婪——這是撿貨期。`,
+ kost:L=>L.marPeak<=-0.2?`融資距峰值${pcs(L.marPeak)},顫抖的手正被大量洗出——這種投降式下跌後,才是我等的底部。`
+   :`融資距峰值僅${pcs(L.marPeak)}、12個月增速${pcs(L.mar12)},顫抖的手還沒交貨;台幣${L.fx.toFixed(2)}(5日${pcs(L.fx5)})外資${L.fx5>0.005?'偏流出':'尚穩'}。投降訊號未到。`,
+ lynch:L=>`風險胃納看加密:比特幣${(L.btc/1000).toFixed(1)}k(${pcs(L.btcC)})、以太幣${L.eth.toFixed(0)}(${pcs(L.ethC)})。台股今日${pcs(L.d1)},${Math.abs(L.d1)>0.02?'波動偏大':'幅度可控'}——它漲跌是自己的估值故事,別當全球接棒。`,
+ dalio:L=>`BTC ${(L.btc/1000).toFixed(1)}k(${pcs(L.btcC)})、ETH ${L.eth.toFixed(0)}(${pcs(L.ethC)})。${(L.btcC<-0.03||L.ethC<-0.03)?'避險資產同步走弱,留意流動性收縮':'沒有系統性恐慌訊號'}。現金水位比預測能力更該檢查。`,
+ graham:L=>`便宜度中位數${L.medCheap.toFixed(2)}(常態=1),對比自身歷史仍貴${L.medCheap<0.7?'一倍以上':'不少'}。指數${pcs(L.d1)}的波動不會讓安全邊際憑空出現——它只來自價格跌或股利漲。`,
+ buffett:L=>L.total>=75?`溫度${L.total}過熱:好公司還是好公司,但這個價別揮棒。備好名單與現金,等它們自己跌進好球帶。`
+   :`溫度${L.total}:${L.total<40?'球開始進帶,品質與便宜雙高的可以出手':'球還在飛,舉棒不是揮棒'}。`,
+ munger:L=>`最容易冒出的念頭是「這次不一樣」。反過來想:乖離200日線${pcs(L.dev)}、溫度${L.total}——${(L.trend==='intact'&&L.total>=75)?'趨勢翻多不會讓貴變便宜,減碼名單的理由沒消失':'紀律比預測值錢:別接刀、別攤平爛股、別嚇砍好股'}。`
+};
+const snapGroup=name=>BRIEF.groups.find(g=>g.name.indexOf(name)>=0);
+const snapMedCheap=()=>{ var g=snapGroup('股票池'); var it=g&&g.items.find(x=>x.label.indexOf('便宜度')>=0); return it?(it.value??0.5):0.5; };
+function lightMinus(warnHi,badHi,v){ return v>badHi?'bad':v>warnHi?'warn':'ok'; } // 越大越糟
+function buildMerged(L,haveCg){
+  const stock={name:'台股與溫度計',items:[
+    {label:'加權報酬指數',display:fmt(L.idx,0),sub:pcs(L.d1),light:L.d1>=0?'ok':(L.d1<-0.03?'bad':'warn')},
+    {label:'距 52 週高點',display:pcs(L.distHigh),light:L.distHigh>-0.05?'ok':(L.distHigh>-0.15?'warn':'bad')},
+    {label:'vs 60 日線',display:pcs(L.vs60),light:L.vs60>=0?'ok':'warn'},
+    {label:'vs 200 日線',display:pcs(L.dev),sub:'乖離',light:lightMinus(0.1,0.2,L.dev)},
+    {label:'市場溫度',display:L.total+' / 100',sub:L.zone,light:L.total>=75?'bad':(L.total>=50?'warn':'ok')},
+    {label:'趨勢燈',display:L.trendTxt,light:L.trend==='intact'?'ok':(L.trend==='weak'?'warn':'bad')}]};
+  const money={name:'資金面',items:[
+    {label:'融資餘額(距峰值)',display:pcs(L.marPeak),sub:L.marPeak<=-0.2?'投降訊號達標':'投降 −20% 未達',light:L.marPeak<=-0.2?'ok':'warn'},
+    {label:'融資 12 個月增速',display:pcs(L.mar12),light:lightMinus(0.1,0.3,L.mar12)},
+    {label:'美元/台幣',display:L.fx.toFixed(3),sub:'5日 '+pcs(L.fx5),light:L.fx5>0.005?'warn':'ok'}]};
+  let pre=snapGroup('盤前'); pre=pre?JSON.parse(JSON.stringify(pre)):{name:'盤前風向',items:[]};
+  if(haveCg) pre.items=pre.items.map(it=>
+    it.label.indexOf('比特幣')>=0?{label:it.label,display:fmt(L.btc,0),sub:pcs(L.btcC),light:L.btcC>=0?'ok':(L.btcC<-0.03?'bad':'warn')}
+   :it.label.indexOf('以太幣')>=0?{label:it.label,display:fmt(L.eth,0),sub:pcs(L.ethC),light:L.ethC>=0?'ok':'warn'}:it);
+  const groups=[stock,money,snapGroup('全球股市'),snapGroup('利率'),pre,snapGroup('股票池')].filter(Boolean);
+  const isToday=BRIEF.date===new Date().toLocaleDateString('en-CA');
+  let members=BRIEF.members, headline=BRIEF.headline;
+  if(!isToday){
+    members=BRIEF.members.map(m=>Object.assign({},m,{today:RULES[m.id]?RULES[m.id](L):m.today}));
+    headline='(即時規則版)溫度'+L.total+'('+L.zone+')、趨勢燈'+L.trendTxt+':指數'+fmt(L.idx,0)+'('+pcs(L.d1)+')、乖離200日線'+pcs(L.dev)+'、距52週高'+pcs(L.distHigh)+'。'+(L.total>=75?'仍鎖一般買進、只留嚴選門':L.total>=50?'門檻收緊、非全面進場':'買點開始浮現')+';融資距峰'+pcs(L.marPeak)+(L.marPeak>-0.2?'、投降未到':'、接近投降')+'。';
+  }
+  return Object.assign({},BRIEF,{groups,members,headline});
+}
+async function fm(ds,id,sd){ const u='https://api.finmindtrade.com/api/v4/data?dataset='+ds+'&start_date='+sd+(id?'&data_id='+id:'');
+  const d=await(await fetch(u)).json(); if(d.status!==200)throw new Error('finmind'); return d.data||[]; }
+async function refreshLive(){
+  const st=document.getElementById('livestat'); st.textContent='⟳ 抓取即時資料中…';
+  const ago=n=>new Date(Date.now()-n*864e5).toISOString().slice(0,10);
+  try{
+    const [idx,mar,fx]=await Promise.all([
+      fm('TaiwanStockTotalReturnIndex','TAIEX',ago(365*5+30)),
+      fm('TaiwanStockTotalMarginPurchaseShortSale',null,ago(400)),
+      fm('TaiwanExchangeRate','USD',ago(30))]);
+    let cg=null; try{ cg=await(await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true')).json(); if(!cg.bitcoin)cg=null; }catch(e){}
+    const L=computeMarket(idx,mar,fx,cg||{bitcoin:{usd:0,usd_24h_change:0},ethereum:{usd:0,usd_24h_change:0}},snapMedCheap());
+    renderAll(buildMerged(L,!!cg));
+    const t=new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
+    const isToday=BRIEF.date===new Date().toLocaleDateString('en-CA');
+    st.innerHTML='⟳ 台股·匯率'+(cg?'·加密':'')+'即時更新於 '+t+'　·　全球指數為 '+BRIEF.date+' 收盤快照'+(isToday?'　·　大師評論:今日排程版':'　·　大師評論:即時規則版(排程未更新)')+(cg?'':'　·　加密即時抓取失敗,用快照');
+  }catch(e){
+    st.textContent='⚠ 即時資料抓取失敗,顯示 '+BRIEF.date+' 快照——請稍後重新整理(FinMind 免費額度整點重置)。';
+  }
+}
+// 先用快照即時渲染(永遠有內容),再抓即時覆蓋
+renderAll(BRIEF);
+refreshLive();
 </script>
 </body>
 </html>
