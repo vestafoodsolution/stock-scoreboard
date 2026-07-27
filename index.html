@@ -110,11 +110,11 @@ details.logic td,details.logic th{border:1px solid var(--line);padding:4px 8px;f
 <tr><td rowspan="2"><b>品質</b></td><td>ROE</td><td>近四季稅後淨利/股東權益,≥15% 佳、≥25% 滿分</td></tr>
 <tr><td>淨利率</td><td>≥15% 滿分</td></tr>
 </table>
-<p><b>品質閘門</b>:非金融/ETF 若 ROE&lt;8% → 總分封頂 55(擋高息價值陷阱)。<b>缺資料</b>給該項中性 5 分。金融股不評 ROE、ETF 只評收益,結構性弱項自動中性。</p>
+<p><b>品質閘門</b>:非金融/ETF 若 ROE&lt;8% → 總分封頂 55(擋高息價值陷阱)。<b>缺資料</b>給該項中性 5 分。金融股不評 ROE(該項中性)。<b>ETF 用獨立規則</b>:只評適用構面(收益／防禦／填息),不要求公司 EPS／ROE／淨利率——這些不適用欄位<b>整項排除、不灌中性分湊總分</b>;配息可抵減比例未確認時,稅效欄標「待確認」,不把整筆配息當可抵減股利。</p>
 <p><b>價格帶(自身殖利率帶)</b>:便宜價=近12月現金股利÷(自身5年平均殖利率×1.3)、合理價=÷1.0、貴價=÷0.9——即「殖利率回到這檔自己的歷史常態」的價位,與你原 Excel 買進/賣出價同一邏輯。每檔用自己的常態,存股用存股的尺、成長股用成長股的尺,不會再出現「台積電要跌回 236」的荒謬目標。近12月無配息者退回「5年均息×16/20/25」估算並標註。<b>持有價</b>欄可直接在表格內輸入你的成本,行動卡會用它算損益。</p>
-<p><b>建議(第一階段已暫時降低訊號強度)</b>:缺近四季EPS或估值→<b>資料不足</b>(不發買賣減碼);近四季持續虧損／ROE轉負／曾配息今停配→<b>賣出</b>(僅基本面惡化);總分&lt;40→<b>排除／不加碼</b>(非賣出);總分與便宜度過門檻→<b>買進</b>;盈餘殖利率&gt;4% 且<b>最後買進日≥今天</b>(還能參與除息)→<b>配息</b>;已過除息、股利未入帳→<b>待填息</b>(不叫你追、也不叫你持有過除息);總分≥55 但偏貴→<b>觀察(偏貴)</b>;總分≥55→<b>持有</b>;其餘→<b>觀察</b>。<b>配息日期</b>分開儲存除息日／最後買進日／發放日,不再用發放日誤判是否還能參與。</p>
+<p><b>建議(第一階段已暫時降低訊號強度)</b>:缺近四季EPS或估值→<b>資料不足</b>(不發買賣減碼);<b>總分&lt;40＝排除／不加碼;只有基本面破壞才賣出</b>(基本面破壞=近四季持續虧損／ROE轉負／曾配息今停配);總分與便宜度過門檻→<b>買進</b>;盈餘殖利率&gt;4% 且<b>最後買進日≥今天</b>(還能參與除息)→<b>配息</b>;已過除息、股利未入帳→<b>待填息</b>(不叫你追、也不叫你持有過除息);總分≥55 但偏貴→<b>觀察(偏貴)</b>;總分≥55→<b>持有</b>;其餘→<b>觀察</b>。<b>配息日期</b>分開儲存除息日／最後買進日／發放日,不再用發放日誤判是否還能參與。</p>
 <p><b>市場溫度計 v2(馬克斯週期,雙軸:溫度=條件、趨勢燈=引信)</b>:溫度三指標——指數 200 日乖離(量表延伸至 +50%,不再頂格失真)、槓桿溫度(融資原始增速與「超額槓桿=融資增速−指數漲幅」各半:漲勢若非融資推動,溫度應誠實反映)、股票池便宜度中位數(EPS 成長中位數為正時給最多 −10 度減溫,盈餘推的漲不同於本夢比推的漲)。<b>趨勢燈</b>獨立於溫度:完好(在60日線上且距高點&lt;8%)/轉弱/破壞(跌破200日線)。</p>
-<p><b>溫度只說「摔下來會多痛」,趨勢燈才說「開始摔了沒」。</b>檔位:<code>低溫&lt;25:買進門檻 0.85+60</code>、<code>回溫:0.95+65</code>、<code>偏熱:1.05+70</code>、<code>過熱+趨勢完好:停發一般買進,僅留嚴選門(便宜度≥1.1 且總分≥75 且填息率≥0.6 →「買進(嚴選)」)</code>、<code>過熱(不論趨勢):總分&lt;55 且便宜度&lt;0.5 →「減碼(過熱)」,趁強出貨</code>、<code>過熱+趨勢轉弱:貴且填息差的持股亮「減碼」</code>、<code>過熱+趨勢破壞:便宜度&lt;0.8 全亮「減碼」</code>。賣出的階梯:<b>賣出</b>=個股本身壞了(虧損或總分&lt;40),與市場冷熱無關;<b>減碼(過熱)</b>=個股沒壞但「平庸+極貴」,趁趨勢還在時分批降低曝險;<b>減碼</b>=引信點燃後的防禦執行。按「完整更新」連同溫度計刷新。</p>
+<p><b>溫度只說「摔下來會多痛」,趨勢燈才說「開始摔了沒」。</b>檔位:<code>低溫&lt;25:買進門檻 0.85+60</code>、<code>回溫:0.95+65</code>、<code>偏熱:1.05+70</code>、<code>過熱+趨勢完好:停發一般買進,僅留嚴選門(便宜度≥1.1 且總分≥75 且填息率≥0.6 →「買進(嚴選)」)</code>、<code>過熱(不論趨勢):總分&lt;55 且便宜度&lt;0.5 →「減碼(過熱)」,趁強出貨</code>、<code>過熱+趨勢轉弱:貴且填息差的持股亮「減碼」</code>、<code>過熱+趨勢破壞:便宜度&lt;0.8 全亮「減碼」</code>。賣出的階梯:<b>總分&lt;40＝排除／不加碼;只有基本面破壞才賣出</b>——<b>賣出</b>=基本面破壞(近四季持續虧損／ROE轉負／曾配息今停配),與市場冷熱、總分高低無關;<b>減碼(過熱)</b>=個股沒壞但「平庸+極貴」,趁趨勢還在時分批降低曝險;<b>減碼</b>=引信點燃後的防禦執行。按「完整更新」連同溫度計刷新。</p>
 </details>
 
 <div class="toolbar">
@@ -200,15 +200,17 @@ const NCOL=26;
 const DEFAULT_BYCODE={}; DEFAULT_DATA.forEach(d=>{ if(d.code) DEFAULT_BYCODE[String(d.code)]=d; });
 
 // ── 快取驗證:欄位、型別、有限數值(NaN/Infinity/字串一律退回 null 或預設) ──
-const NUMF=['J','div1','div5','divEarn1','divYldEarn','divYldAll','avgYld5','cheap','divYears','fillRate','fillN','fillDays','vol','mdd','roe','q1','q2','q3','q4','AK','AA','hold','E','revYoY','T','Y','U','AB','AC','Z','epsFallbackCount'];
-const STRF=['name','code','type','market','Jdate','exDate','lastBuyDate','payDate','q1Period','q2Period','q3Period','q4Period','epsUpdatedAt','epsWindowEnd','epsGrowthLabel'];
+const NUMF=['J','div1','div5','divEarn1','divYldEarn','divYldAll','avgYld5','cheap','divYears','fillRate','fillN','fillDays','vol','mdd','roe','q1','q2','q3','q4','AK','AA','hold','E','revYoY','T','Y','U','AB','AC','Z','epsFallbackCount','etfTaxCreditRatio'];
+const STRF=['name','code','type','market','Jdate','exDate','lastBuyDate','payDate','q1Period','q2Period','q3Period','q4Period','epsUpdatedAt','epsWindowEnd','epsGrowthLabel','etfUpdatedAt'];
 const BOOLF=['q1Fallback','q2Fallback','q3Fallback','q4Fallback','epsInsufficient','epsStale']; // EPS 來源布林旗標
+// 持有價:僅接受有限且 >0 的數字;0／負數／NaN／Infinity／字串一律視為空值(null)
+function validHold(v){ if(v==null||v==='') return null; const n=+v; return (isFinite(n)&&n>0)?n:null; }
 function sanitizeStock(x){
   if(!x||typeof x!=='object') return null;
   const o={};
   for(const k of STRF){ if(x[k]!=null && x[k]!=='') o[k]=String(x[k]); }
   if(o.payDate==null && x.AL!=null && x.AL!=='') o.payDate=String(x.AL);   // 舊欄位 AL(發放日)遷移為 payDate
-  for(const k of NUMF){ if(k in x){ const v=x[k]; if(v==null||v===''){o[k]=null;} else { const n=+v; o[k]=isFinite(n)?n:null; } } }
+  for(const k of NUMF){ if(k in x){ if(k==='hold'){ o.hold=validHold(x.hold); continue; } const v=x[k]; if(v==null||v===''){o[k]=null;} else { const n=+v; o[k]=isFinite(n)?n:null; } } }
   for(const k of BOOLF){ if(k in x) o[k]=!!x[k]; }
   if(o.type && !['stock','fin','etf'].includes(o.type)) o.type='stock';
   if(!(o.code&&o.code.trim()) && !(o.name&&o.name.trim())) return null;    // 空列丟棄
@@ -241,7 +243,7 @@ function migrateOld(){
   if(!arr) return;
   arr=sanitizeArr(arr)||[]; const holds={}, custom=[];
   arr.forEach(s=>{ const c=String(s.code||''); if(!c) return;
-    if(DEFAULT_BYCODE[c]){ if(s.hold!=null&&isFinite(s.hold)) holds[c]=+s.hold; }
+    if(DEFAULT_BYCODE[c]){ const h=validHold(s.hold); if(h!=null) holds[c]=h; }
     else custom.push(s); });
   try{ localStorage.setItem(USER_KEY, JSON.stringify({ver:null, holds, fund:{}}));  // ver:null → fetched overlay 作廢,預設用最新內建
        localStorage.setItem(CUSTOM_KEY, JSON.stringify(custom));
@@ -256,7 +258,7 @@ function buildStocks(){
   DEFAULT_DATA.forEach(d=>{ const c=String(d.code||''); if(!c||deletedCodes.includes(c)) return; // 只有明確 deletedCodes 才移除
     let o=JSON.parse(JSON.stringify(d));
     if(fund[c]){ const f=sanitizeStock(Object.assign({code:c,name:d.name}, fund[c])); if(f){ delete f.hold; Object.assign(o,f); o.code=c; o.name=d.name; } } // 同版本 fetched overlay
-    o.hold=(holds[c]!=null&&isFinite(holds[c]))?+holds[c]:(o.hold??null);   // 合法 hold 依 code 併回
+    o.hold = validHold(holds[c]!=null?holds[c]:o.hold);   // 合法 hold(有限且>0)依 code 併回,否則 null
     out.push(o); });
   loadCustom().forEach(s=>{ if(s.code&&!DEFAULT_BYCODE[String(s.code)]) out.push(s); }); // 自訂股獨立清單
   return out;
@@ -266,7 +268,7 @@ function save(){
   const holds={}, fund={}, custom=[];
   stocks.forEach(s=>{ const c=String(s.code||''); if(!c) return;
     if(DEFAULT_BYCODE[c]){
-      if(s.hold!=null&&isFinite(s.hold)) holds[c]=+s.hold;                  // 持有價=使用者資料
+      { const h=validHold(s.hold); if(h!=null) holds[c]=h; }               // 持有價=使用者資料(僅存有限且>0)
       const f={}; for(const k in s){ if(k==='hold'||k==='name'||k==='code') continue; f[k]=s[k]; } fund[c]=f; // fetched/編輯 overlay
     } else { custom.push(s); }                                             // 代號∉內建 → 自訂股
   });
@@ -368,6 +370,25 @@ function renderGauge(){
     <div class="gi">資料日 ${MARKET.date} · 固定母體 ${g.sample} 檔(便宜度中位取樣 ${g.cheapN} 檔,零股利不計)</div>`;
 }
 
+// ── ETF 專用完整性:不要求公司 EPS/ROE/淨利率;需最新價+日期、現金配息、5年均殖利率、填息率、波動、回撤、更新時間 ──
+function etfComplete(s){
+  return nn(s.J)!=null && !!s.Jdate
+    && nn(s.div1)!=null && nn(s.avgYld5)!=null
+    && nn(s.fillRate)!=null && nn(s.vol)!=null && nn(s.mdd)!=null
+    && !!s.etfUpdatedAt;
+}
+// ── 完整更新原子化驗證:候選資料逐類必要性檢查,任一失敗即不 commit(見 updateStock) ──
+// type='etf' 跳過 EPS 要求並改驗 ETF 必要欄位;空股利陣列一律視為 API失敗/缺漏(不得沿用舊衍生值解閘)
+function validateFull(cand, dv, type){
+  if(!cand || cand.J==null) return {ok:false, source:'price', reason:'no-price'};
+  if(type!=='etf' && cand.epsInsufficient===true) return {ok:false, source:'eps', reason:'eps-insufficient'};
+  const hasDivRows = Array.isArray(dv) && dv.length>0;
+  if(!hasDivRows) return {ok:false, source:'dividend', reason:'dividend-empty'}; // 空陣列=無法確認「確實不配息」→ 失敗
+  if(type==='etf'){ for(const k of ['avgYld5','fillRate','vol','mdd']) if(cand[k]==null) return {ok:false, source:'etf-'+k, reason:'etf-incomplete'}; }
+  return {ok:true};
+}
+const SRC_TXT={price:'股價',eps:'連續四季EPS',dividend:'股利',fs:'財報'};
+function srcLabel(src){ return src?(SRC_TXT[src]||src):''; }
 function score(s){
   const G=currentGauge_cache||currentGauge();
   const type=s.type||'stock', fin=type==='fin', etf=type==='etf';
@@ -376,24 +397,29 @@ function score(s){
   const epsNeg=ttmEPS!=null&&ttmEPS<=0;
   const payout=(nn(s.div1)!=null&&ttmEPS&&ttmEPS>0)?nn(s.div1)/ttmEPS:null;
   const items=[];
-  function it(p,label,sv,raw,rawFmt,neutralIf){ let sc=sv,neu=false; if(neutralIf||sc==null){sc=5;neu=true;} items.push({p,label,sc,raw,rawFmt,neu}); }
-  it('tax','盈餘現金殖利率', interp(nn(s.divYldEarn),[[0.01,0],[0.03,4],[0.045,8],[0.06,10],[0.075,9],[0.1,6]]), nn(s.divYldEarn),'pct');
-  it('tax','配息率健康', epsNeg?0:interp(payout,[[0.2,1],[0.4,8],[0.7,10],[0.8,9],[1.0,4],[1.2,0]]), payout,'pct', etf);
+  // exclIf=不適用欄位:整項不計分、不列入(不給中性 5 分湊總分);與 neutralIf(缺資料給中性)不同
+  function it(p,label,sv,raw,rawFmt,neutralIf,exclIf){ if(exclIf) return; let sc=sv,neu=false; if(neutralIf||sc==null){sc=5;neu=true;} items.push({p,label,sc,raw,rawFmt,neu}); }
+  // ETF 無公司盈餘可抵減比例未定 → 以「總現金殖利率」當收益構面,不冒充可抵減盈餘殖利率
+  const incYld = etf ? nn(s.divYldAll) : nn(s.divYldEarn);
+  it('tax', etf?'現金殖利率(收益)':'盈餘現金殖利率', interp(incYld,[[0.01,0],[0.03,4],[0.045,8],[0.06,10],[0.075,9],[0.1,6]]), incYld,'pct');
+  it('tax','配息率健康', epsNeg?0:interp(payout,[[0.2,1],[0.4,8],[0.7,10],[0.8,9],[1.0,4],[1.2,0]]), payout,'pct', etf, etf); // ETF 無 EPS→配息率不適用,排除
   it('tax','連續配息年數', interp(nn(s.divYears),[[0,0],[3,3],[6,6],[10,10]]), nn(s.divYears),'y');
   it('fill','填息率', interp(nn(s.fillRate),[[0,0],[0.4,3],[0.6,6],[0.8,8],[1,10]]), nn(s.fillRate),'ratio');
   it('fill','填息速度', interp(nn(s.fillDays),[[10,10],[30,8],[60,6],[120,3],[180,0]]), nn(s.fillDays),'day');
   it('defense','相對便宜度', interp(nn(s.cheap),[[0.5,0],[0.8,3],[1.0,6],[1.2,9],[1.5,10]]), nn(s.cheap),'x');
   it('defense','低波動', interp(nn(s.vol),[[0.15,10],[0.25,7],[0.35,4],[0.5,1],[0.7,0]]), nn(s.vol),'pct');
   it('defense','抗跌(回撤小)', interp(nn(s.mdd),[[-0.7,0],[-0.5,3],[-0.35,7],[-0.2,10]]), nn(s.mdd),'pct');
-  it('quality','ROE', interp(nn(s.roe),[[0,0],[0.08,4],[0.15,7],[0.2,9],[0.25,10]]), nn(s.roe),'pct', fin);
-  it('quality','淨利率', interp(nn(s.AA),[[0,0],[5,3],[10,6],[15,9],[20,10]]), nn(s.AA),'raw%', etf);
+  it('quality','ROE', interp(nn(s.roe),[[0,0],[0.08,4],[0.15,7],[0.2,9],[0.25,10]]), nn(s.roe),'pct', fin, etf);   // ETF 無公司 ROE→排除,不灌中性分
+  it('quality','淨利率', interp(nn(s.AA),[[0,0],[5,3],[10,6],[15,9],[20,10]]), nn(s.AA),'raw%', etf, etf);        // ETF 無公司淨利率→排除,不灌中性分
   const pill={tax:[],fill:[],defense:[],quality:[]};
   items.forEach(x=>pill[x.p].push(x.sc));
-  const sub={}; for(const k in pill) sub[k]=pill[k].length?pill[k].reduce((a,b)=>a+b,0)/pill[k].length*10:0;
-  // 權重防呆:總和必須 >0,否則改用預設(避免全體總分=0 → 全部被判賣出)
-  let WW=W, wsum=W.tax+W.fill+W.defense+W.quality;
-  if(!(wsum>0)){ WW=DEF_W; wsum=DEF_W.tax+DEF_W.fill+DEF_W.defense+DEF_W.quality; }
-  let total=(sub.tax*WW.tax+sub.fill*WW.fill+sub.defense*WW.defense+sub.quality*WW.quality)/wsum;
+  // 只納入「有適用項目」的支柱;ETF 品質支柱(ROE/淨利率)整支不適用 → 不進總分、其權重不計入分母
+  const sub={tax:null,fill:null,defense:null,quality:null}; const active=[];
+  for(const k in pill){ if(pill[k].length){ sub[k]=pill[k].reduce((a,b)=>a+b,0)/pill[k].length*10; active.push(k); } }
+  // 權重防呆:適用支柱權重總和必須 >0,否則改用預設(避免總分=0 → 全部被判賣出)
+  let WW=W, wsum=0; for(const k of active) wsum+=(WW[k]||0);
+  if(!(wsum>0)){ WW=DEF_W; wsum=0; for(const k of active) wsum+=(DEF_W[k]||0); }
+  let total=0; for(const k of active) total+=sub[k]*WW[k]; total = wsum>0 ? total/wsum : 0;
   if(!fin&&!etf&&nn(s.roe)!=null&&s.roe<0.08) total=Math.min(total,55);
   total=Math.max(0,Math.min(100, isFinite(total)?total:0));           // 總分永遠夾在 0–100,永不 NaN
   const cheap=nn(s.cheap),fillR=nn(s.fillRate),yE=nn(s.divYldEarn);
@@ -401,10 +427,19 @@ function score(s){
   const st=STANCE[G.zone], trend=G.trend||'intact';
   // ── 訊號安全閘 ──
   // 有真實來源期間(跑過完整更新、公司行動已正規化)才發訊號;內建靜態/未正規化 → 資料待更新,禁買賣減碼與價格帶
-  const hasProv = !!s.q1Period && s.epsInsufficient!==true;
-  const dataInsufficient = s.epsInsufficient===true;                  // 更新過但組不出連續四季
-  const dataStale = !hasProv && !dataInsufficient;                    // 從未更新(靜態/國巨未正規化)
+  // ETF 用獨立完整性規則(不要求公司 EPS/ROE/淨利率);一般股用連續四季 EPS 來源判斷
+  let dataInsufficient, dataStale;
+  if(etf){
+    const complete = etfComplete(s);
+    dataStale = !s.etfUpdatedAt && !complete;      // 從未完整更新且不完整 → 待更新
+    dataInsufficient = !complete && !dataStale;    // 更新過但缺必要 ETF 欄位 → 資料不足
+  } else {
+    const hasProv = !!s.q1Period && s.epsInsufficient!==true;
+    dataInsufficient = s.epsInsufficient===true;                     // 更新過但組不出連續四季
+    dataStale = !hasProv && !dataInsufficient;                       // 從未更新(靜態/國巨未正規化)
+  }
   const noSignal = dataInsufficient || dataStale || cheap==null;      // 任一 → 禁訊號與價格帶
+  const etfTaxUnknown = etf && nn(s.etfTaxCreditRatio)==null;         // ETF 可抵減比例未確認 → 稅效欄「待確認」,不得全額當可抵減股利
   // 最新兩季依 period 序判斷(不依固定欄名 q3/q4;跨年不判反)
   const per=[s.q1Period,s.q2Period,s.q3Period,s.q4Period];
   let ord=[3,2,1,0];                                                  // 預設慣例:q1..q4=舊→新 → 反轉成新→舊
@@ -451,7 +486,7 @@ function score(s){
   else if(d5){ cheapP=d5*16; fairP=d5*20; expP=d5*25; bandMode='股利帶(近12月無配息,以5年均息估)'; }
   if(noSignal){ cheapP=fairP=expP=null; bandMode=null; }              // 資料待更新/不足 → 不給價格帶
   const farBand=(cheapP&&nn(s.J))?(1-cheapP/s.J)>0.6:false; // 便宜價距現價太遠=不在存股射程
-  return {ttmEPS,payout,sub,total,items,M,cheapP,fairP,expP,bandMode,farBand,flags,ds,noSignal};
+  return {ttmEPS,payout,sub,total,items,M,cheapP,fairP,expP,bandMode,farBand,flags,ds,noSignal,etf,taxUnknown:etfTaxUnknown};
 }
 
 const fmt=(v,d=2)=>v==null||!isFinite(v)?'—':v.toLocaleString('zh-TW',{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -466,6 +501,7 @@ function rawFmt(v,t){ if(v==null||!isFinite(v))return '—';
 
 // EPS 來源提示:hover 看連續四季窗口每季來源;窗口一律連續,不跨年拼接
 function epsInfo(s,c){
+  if((s.type||'')==='etf') return {badge:'', title:'ETF 無公司 EPS(以收益/防禦/填息評分)'};
   if(s.epsInsufficient) return {badge:' <span class="warn" title="無任何完整連續四季窗口">資料不足</span>', title:'EPS 無完整連續四季,資料不足'};
   const per=[s.q1Period,s.q2Period,s.q3Period,s.q4Period];
   if(!per[0]) return {badge:' <span class="warn" title="尚未完整更新,無來源期間,預設不發交易訊號">待更新</span>', title:'近四季EPS '+fmt(c.ttmEPS)+'(來源期間需按「完整更新」取得;無期間一律不發訊號)'};
@@ -483,11 +519,11 @@ function rowHTML(s,c){
   return `<td><span class="rowdel" title="刪除這檔">✕</span>${s.name}${need?' <span class="warn" title="尚未抓完整基本面(等額度補),防禦/填息以中性計">待</span>':''}</td>
     <td>${s.code||''}</td><td>${badge(c.M)}</td>
     <td class="sc ${scCls(c.total)}">${c.total.toFixed(1)}</td>
-    <td class="pillcell">${c.sub.tax.toFixed(0)}</td><td class="pillcell">${c.sub.fill.toFixed(0)}</td>
-    <td class="pillcell">${c.sub.defense.toFixed(0)}</td><td class="pillcell">${c.sub.quality.toFixed(0)}</td>
+    <td class="pillcell">${c.sub.tax==null?'—':c.sub.tax.toFixed(0)}</td><td class="pillcell">${c.sub.fill==null?'—':c.sub.fill.toFixed(0)}</td>
+    <td class="pillcell">${c.sub.defense==null?'—':c.sub.defense.toFixed(0)}</td><td class="pillcell" title="${c.sub.quality==null?'ETF 無公司品質構面,不計入總分':''}">${c.sub.quality==null?'—':c.sub.quality.toFixed(0)}</td>
     <td class="${band}" title="${s.Jdate?'報價日 '+s.Jdate:''}">${fmt(nn(s.J))}</td>
     <td class="${nn(s.cheap)!=null?(s.cheap>=1?'ok':(s.cheap<0.8?'bad':'')):''}">${nn(s.cheap)!=null?s.cheap.toFixed(2):'—'}</td>
-    <td class="${z(s.divYldEarn)>=0.05?'pos':''}">${pct(nn(s.divYldEarn))}</td>
+    <td class="${!c.taxUnknown&&z(s.divYldEarn)>=0.05?'pos':''}">${c.taxUnknown?'<span class="warn" title="ETF 配息含資本利得/利息/境外所得等,可適用 8.5% 抵減的比例待確認,勿全額視為可抵稅">待確認</span>':pct(nn(s.divYldEarn))}</td>
     <td>${pct(nn(s.divYldAll))}</td>
     <td title="${c.farBand?'距現價過遠:此股現價不在存股射程內,價格帶僅供參考':''}">${fmt(c.cheapP)}${c.farBand?'<span class="warn">*</span>':''}</td><td>${fmt(c.fairP)}</td><td>${fmt(c.expP)}</td>
     <td class="${nn(s.fillRate)!=null?(s.fillRate>=0.8?'ok':(s.fillRate<0.5?'bad':'')):''}">${nn(s.fillRate)!=null?(s.fillRate*100).toFixed(0)+'%':'—'}</td>
@@ -606,9 +642,13 @@ function adviceHTML(s,c){
     if((M==='賣出'||M.startsWith('減碼'))&&pnl>0.3)p+=`獲利豐厚:分批了結是把紙上富貴變現。`;
     L.push(`<div class="advsec"><b class="h">你的部位</b>${p}</div>`);
   }
-  const yE=nn(s.divYldEarn);
-  if(yE!=null&&yE>0.005){
-    L.push(`<div class="advsec"><b class="h">稅務</b>盈餘配息殖利率 ${(yE*100).toFixed(1)}%(享 8.5% 抵減);記得全戶股利約 94 萬内抵減效益最大,超過只增稅不增抵。</div>`);
+  if(c.taxUnknown){
+    L.push(`<div class="advsec"><b class="h">稅務</b>ETF 配息含資本利得／利息／境外所得等多種來源,可適用 8.5% 抵減的比例<b>待確認</b>——勿將整筆配息當可抵減股利。請查該 ETF 當年度「收益分配通知書」的可抵減股利占比再估稅效。</div>`);
+  } else {
+    const yE=nn(s.divYldEarn);
+    if(yE!=null&&yE>0.005){
+      L.push(`<div class="advsec"><b class="h">稅務</b>盈餘配息殖利率 ${(yE*100).toFixed(1)}%(享 8.5% 抵減);記得全戶股利約 94 萬内抵減效益最大,超過只增稅不增抵。</div>`);
+    }
   }
   return `<div class="advtitle"><span class="close" onclick="document.getElementById('advpop').style.display='none'">✕</span>${badge(M)} ${s.name} <span style="color:var(--sub);font-weight:400">${s.code||''}</span></div>`+L.join('');
 }
@@ -714,7 +754,7 @@ function computeJS(price,div,fs,bs,code){
 // 兩者都保留使用者資料(持有價等),只更新基本面/股價/股利/日期。
 async function updateStock(s, full){
   const id=String(s.code||'').trim(); if(!id) return {ok:false, reason:'no-code'};
-  const now=Date.now();
+  const now=Date.now(); const type=s.type||'stock';
   try{
     if(full){
       const [pr,dv,fsx,bsx]=await Promise.all([
@@ -722,10 +762,17 @@ async function updateStock(s, full){
         fm('TaiwanStockDividend',id,iso(now-365*12*864e5)),
         fm('TaiwanStockFinancialStatements',id,iso(now-365*5*864e5)), // 5 年財報(供滾動TTM與前一期比較)
         fm('TaiwanStockBalanceSheet',id,iso(now-400*864e5))]);
-      if(!pr||!pr.length) return {ok:false, reason:'no-price'};
-      const m=computeJS(pr,dv||[],fsx||[],bsx||[],id);
-      for(const k in m) if(m[k]!=null) s[k]=m[k];
-      for(const k of EPS_KEYS) if(k in m) s[k]=m[k];                  // EPS 來源欄位(含 null AK/false fallback)整批落地
+      if(!pr||!pr.length) return {ok:false, reason:'no-price', source:'price'};
+      // ── 原子化:先建候選(cand),逐類驗證必要資料,全過才一次性 commit;任一失敗不動正式資料、不解安全閘 ──
+      const cand=computeJS(pr,dv||[],fsx||[],bsx||[],id);
+      const v=validateFull(cand, dv||[], type);
+      if(!v.ok) return {ok:false, reason:v.reason, source:v.source};  // 顯示哪個資料來源失敗;正式舊資料不被半套覆寫
+      // 有股利紀錄但皆為零 → 確認「確實不配息」才把股利設 0(空陣列已在驗證擋下,不因空陣列自行推論)
+      if(cand.div1==null && Array.isArray(dv) && dv.length){ cand.div1=0; cand.divEarn1=0; cand.divYldAll=0; cand.divYldEarn=0; }
+      for(const k in cand) if(cand[k]!=null) s[k]=cand[k];
+      for(const k of EPS_KEYS) if(k in cand) s[k]=cand[k];            // EPS 來源欄位(含 null AK/false fallback)整批落地
+      if(type==='etf') s.etfUpdatedAt = cand.Jdate || iso(now);       // ETF 更新時間標記(解安全閘用;不冒充 EPS)
+      return {ok:true, incomplete: (type!=='etf' && s.epsInsufficient===true)};
     } else {
       const pr=await fm('TaiwanStockPrice',id,iso(now-20*864e5));
       if(!pr||!pr.length) return {ok:false, reason:'no-price'};
@@ -741,7 +788,7 @@ async function runFetch(full){
   const now=Date.now(); let done=0,ok=0,quota=false; const fail=[];
   async function one(s){
     const r=await updateStock(s, full);
-    if(r.ok) ok++; else { fail.push(s.name); if(r.quota) quota=true; }
+    if(r.ok) ok++; else { fail.push(s.name+(r.source?'('+srcLabel(r.source)+')':'')); if(r.quota) quota=true; }
     done++; stat.textContent=`更新中… ${done}/${targets.length}`; if(done%5===0)save();
   }
   const q=[...targets]; await Promise.all(Array.from({length:full?3:5},async()=>{while(q.length)await one(q.shift());}));
@@ -827,10 +874,11 @@ document.addEventListener('click',e=>{
 document.querySelector('#tbl tbody').addEventListener('input',e=>{
   const hi=e.target.closest('input.holdin');
   if(hi){ const tr=hi.closest('tr[data-i]'); if(!tr)return;
-    stocks[+tr.dataset.i].hold = hi.value===''?null:+hi.value; save(); return; }
+    stocks[+tr.dataset.i].hold = validHold(hi.value); save(); return; }   // 持有價:僅收有限且>0,否則 null
   const inp=e.target.closest('input[data-f],select[data-f]');if(!inp||openIdx==null)return;
   const f=inp.dataset.f; const isStr=['name','code','type','exDate','lastBuyDate','payDate'].includes(f);
-  stocks[openIdx][f]=isStr?(inp.value||null):(inp.value===''?null:+inp.value);
+  if(f==='hold') stocks[openIdx].hold=validHold(inp.value);                 // 持有價同一驗證規則
+  else stocks[openIdx][f]=isStr?(inp.value||null):(inp.value===''?null:+inp.value);
   if(['J','divEarn1','div1','avgYld5'].includes(f)) recalcFromPrice(stocks[openIdx]); // 股價/股利手改 → 立即重算殖利率與便宜度
   save();
   const c=score(stocks[openIdx]); const tr=document.querySelector(`tr[data-i="${openIdx}"]`); if(tr)tr.innerHTML=rowHTML(stocks[openIdx],c);
@@ -844,6 +892,7 @@ document.getElementById('tok').addEventListener('click',setToken);
 // 股價、滾動四季 EPS、股利、除息/發放日、5年均息、填息、波動、回撤、ROE、公司行動,全部完成才產生評分。
 // 辨識並保存市場別:只接受 twse(上市)/tpex(上櫃);其餘視為無效
 async function identifyStock(s){
+  s.market=null;                                                     // 每次重試先清除舊市場別,只採用本次回應的 twse/tpex
   try{ const info=await fm('TaiwanStockInfo',String(s.code),iso(Date.now()-30*864e5));
     if(info&&info.length){ const o=info[info.length-1]; s.name=o.stock_name||o.name||s.code;
       const mkt=String(o.type||o.market||'').toLowerCase();
@@ -865,7 +914,7 @@ async function tryAddStock(s){          // 供新增與「重試更新」共用
   }
   const r=await updateStock(s, true);
   if(!r.ok){                            // 更新未完成:不加入半殘資料、不用中性分數湊建議、提供重試
-    stat.innerHTML=`更新未完成／資料不足:抓不到 ${s.code} 的完整資料(代號可能打錯或 FinMind 額度用完)。 <button id="addretry" class="primary">重試更新</button>`;
+    stat.innerHTML=`更新未完成／資料不足:${s.code} ${r.source?srcLabel(r.source)+'資料缺漏':'抓不到完整資料'}(代號可能打錯或 FinMind 額度用完),未寫入半套資料。 <button id="addretry" class="primary">重試更新</button>`;
     const rb=document.getElementById('addretry'); if(rb) rb.onclick=()=>tryAddStock(s);
     return;
   }
@@ -889,7 +938,7 @@ async function addStock(){
 async function retryUpdate(s){
   const stat=document.getElementById('qstat'); stat.textContent=`重試更新 ${s.name}…`;
   const r=await updateStock(s, true); save(); render();
-  stat.textContent = !r.ok ? `重試失敗:${s.name}(${r.quota?'FinMind 額度用完':'抓不到資料'})`
+  stat.textContent = !r.ok ? `重試失敗:${s.name}(${r.quota?'FinMind 額度用完':(r.source?srcLabel(r.source)+'資料缺漏':'抓不到資料')})`
     : (r.incomplete ? `${s.name} 仍資料不足(四季 EPS 組不齊)` : `${s.name} 已更新完成`);
 }
 document.getElementById('add').addEventListener('click',addStock);
