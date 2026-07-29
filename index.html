@@ -630,7 +630,20 @@ async function addStock(){
 document.getElementById('add').addEventListener('click',addStock);
 document.getElementById('reset').addEventListener('click',()=>{if(confirm('會覆蓋你的修改,還原成內建資料。確定?')){stocks=JSON.parse(JSON.stringify(DEFAULT_DATA));openIdx=null;save();render();}});
 document.getElementById('export').addEventListener('click',()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(stocks,null,1)],{type:'application/json'}));a.download='存股評分.json';a.click();});
-syncW(); bindW(); render();
+// The updater writes only this one canonical file.  If it is missing, invalid,
+// or cannot be fetched, the embedded DEFAULT_DATA above remains on screen.
+async function loadCanonicalStockSnapshot(){
+  try{
+    const r=await fetch('data/stock-pool-snapshot.json',{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const s=await r.json();
+    if(s.schemaVersion!==1||!Array.isArray(s.stocks)||s.stocks.length!==DEFAULT_DATA.length)throw new Error('schema or stock count');
+    stocks=s.stocks;
+    if(s.fundamentals&&Number.isFinite(Number(s.fundamentals.medAK)))MARKET={...MARKET,medAK:Number(s.fundamentals.medAK)};
+    render();
+  }catch(e){/* Safe fallback: embedded data/local user data stays in use. */}
+}
+syncW(); bindW(); render(); loadCanonicalStockSnapshot();
 </script>
 </body>
 </html>
