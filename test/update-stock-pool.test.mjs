@@ -39,6 +39,11 @@ assert.equal(fundamentals.updated[0].AA, 20);
 assert.equal(fundamentals.medAK, 1);
 assert.equal(fundamentals.periodEnd, '2026-03-31');
 assert.equal(fundamentals.validUntil, '2026-08-14');
+assert.deepEqual(
+  Object.fromEntries(['q1Period', 'q2Period', 'q3Period', 'q4Period'].map(key => [key, fundamentals.updated[0][key]])),
+  { q1Period: '2025Q2', q2Period: '2025Q3', q3Period: '2025Q4', q4Period: '2026Q1' },
+  'canonical EPS values must carry the four exact FinMind source quarters for index.html safety gate'
+);
 assert.throws(() => buildFundamentalsCandidate(fundamentalStocks, new Map([['2330', epsRows(eightDates.slice(1))]]), '2026-05-10'));
 assert.throws(() => buildFundamentalsCandidate(fundamentalStocks, new Map([['2330', epsRows(eightDates)]]), '2026-08-15'));
 const zeroIncome = epsRows(eightDates).map(row => row.type === 'IncomeAfterTaxes' ? { ...row, value: 0 } : row);
@@ -65,6 +70,7 @@ assert.equal(commonPeriodCandidate.validUntil, '2026-08-14');
 assert.equal(commonPeriodCandidate.updated[0].q4, 8, 'must not use this company’s Q2 EPS');
 assert.equal(commonPeriodCandidate.updated[0].AA, 65, 'must calculate AA from the common Q1 window');
 assert.equal(commonPeriodCandidate.medAK, 1.6);
+assert.equal(commonPeriodCandidate.updated[0].q4Period, '2026Q1', 'source quarter must match the common, not the newest company-specific window');
 
 assert.throws(
   () => buildFundamentalsCandidate(

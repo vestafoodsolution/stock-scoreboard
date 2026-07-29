@@ -22,12 +22,9 @@ const requestedDate = [...args].find(a => a.startsWith('--date='))?.slice(7) || 
 const target = [...args].find(a => a.startsWith('--target='))?.slice(9) || 'price';
 
 function taipeiDate(now = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' })
-    .formatToParts(now).reduce((out, p) => ({ ...out, [p.type]: p.value }), {}).year + '-' +
-    new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' })
-      .formatToParts(now).reduce((out, p) => ({ ...out, [p.type]: p.value }), {}).month + '-' +
-    new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' })
-      .formatToParts(now).reduce((out, p) => ({ ...out, [p.type]: p.value }), {}).day;
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(now);
 }
 
 function num(value) {
@@ -223,6 +220,13 @@ function quarterEndsEndingAt(periodEnd, count = 8) {
   return periods.reverse();
 }
 
+function quarterLabel(periodEnd) {
+  const match = String(periodEnd).match(/^(\d{4})-(03-31|06-30|09-30|12-31)$/);
+  if (!match) throw new Error(`invalid quarterly period end: ${periodEnd}`);
+  const quarter = ['03-31', '06-30', '09-30', '12-31'].indexOf(match[2]) + 1;
+  return `${match[1]}Q${quarter}`;
+}
+
 function valuesByPeriod(rows, type) {
   const values = new Map();
   const conflicts = new Set();
@@ -274,7 +278,18 @@ export function buildFundamentalsCandidate(stocks, rowsByCode, asOf) {
     const prior = prior4Periods.reduce((sum, period) => sum + eps.values.get(period), 0);
     const current = latest4Periods.reduce((sum, period) => sum + eps.values.get(period), 0);
     const ak = prior > 0 ? +(current / prior - 1).toFixed(4) : null;
-    const next = { ...stock, q1: +eps.values.get(latest4Periods[0]).toFixed(2), q2: +eps.values.get(latest4Periods[1]).toFixed(2), q3: +eps.values.get(latest4Periods[2]).toFixed(2), q4: +eps.values.get(latest4Periods[3]).toFixed(2), AK: ak };
+    // index.html's safety gate accepts a company only when its four EPS
+    // values carry explicit source periods.  These labels come directly from
+    // the selected common FinMind quarter window; do not infer dividend dates
+    // here because TaiwanStockFinancialStatements does not provide them.
+    const next = {
+      ...stock,
+      q1: +eps.values.get(latest4Periods[0]).toFixed(2), q1Period: quarterLabel(latest4Periods[0]),
+      q2: +eps.values.get(latest4Periods[1]).toFixed(2), q2Period: quarterLabel(latest4Periods[1]),
+      q3: +eps.values.get(latest4Periods[2]).toFixed(2), q3Period: quarterLabel(latest4Periods[2]),
+      q4: +eps.values.get(latest4Periods[3]).toFixed(2), q4Period: quarterLabel(latest4Periods[3]),
+      AK: ak
+    };
     const income = valuesByPeriod(rows || [], 'IncomeAfterTaxes');
     const revenue = valuesByPeriod(rows || [], 'Revenue');
     // AA must use the same common four quarters as EPS.  If a financial
