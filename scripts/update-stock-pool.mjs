@@ -89,13 +89,28 @@ export function rowMap(payload) {
   return result;
 }
 
-async function officialPrices(date) {
+function tpexRocDate(date) {
+  const [year, month, day] = date.split('-').map(Number);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day) || year < 1912) {
+    throw new Error(`cannot convert invalid Gregorian date to TPEx ROC date: ${date}`);
+  }
+  return `${String(year - 1911).padStart(3, '0')}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
+}
+
+export function officialPriceUrls(date) {
   const compact = date.replaceAll('-', '');
-  const slash = date.replaceAll('-', '/');
-  const urls = [
+  // TPEx's current official API requires an ROC-calendar date and type=EW
+  // (all OTC securities excluding warrants).  A Gregorian date or omitted
+  // type returns a successful but empty table, which must never look valid.
+  const rocDate = tpexRocDate(date);
+  return [
     `https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date=${compact}&type=ALLBUT0999&response=json`,
-    `https://www.tpex.org.tw/www/zh-tw/afterTrading/otc?date=${encodeURIComponent(slash)}&response=json`
+    `https://www.tpex.org.tw/www/zh-tw/afterTrading/otc?date=${encodeURIComponent(rocDate)}&type=EW&response=json`
   ];
+}
+
+export async function officialPrices(date) {
+  const urls = officialPriceUrls(date);
   const replies = await Promise.all(urls.map(async url => {
     const response = await fetch(url, { headers: { 'user-agent': 'stock-scoreboard-snapshot/1.0' } });
     if (!response.ok) throw new Error(`official source HTTP ${response.status}`);
@@ -104,14 +119,52 @@ async function officialPrices(date) {
   return new Map(replies.flatMap(map => [...map]));
 }
 
-async function finMindFundamentals(code) {
+const FINMIND_MAX_ATTEMPTS = 3;
+const FINMIND_RETRY_DELAYS_MS = [1000, 2000];
+
+function finMindUrl(code, start, token = process.env.FINMIND_TOKEN?.trim()) {
+  const params = new URLSearchParams({
+    dataset: 'TaiwanStockFinancialStatements',
+    data_id: String(code),
+    start_date: start
+  });
+  // The optional token is deliberately read only from the environment.  Never
+  // log this URL: its query string may contain the credential.
+  if (token) params.set('token', token);
+  return `https://api.finmindtrade.com/api/v4/data?${params}`;
+}
+
+async function fetchFinMindWithRetry(url, code, { fetchImpl = fetch, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
+  for (let attempt = 1; attempt <= FINMIND_MAX_ATTEMPTS; attempt += 1) {
+    let response;
+    try {
+      response = await fetchImpl(url, { headers: { 'user-agent': 'stock-scoreboard-snapshot/1.0' } });
+    } catch {
+      if (attempt === FINMIND_MAX_ATTEMPTS) throw new Error(`FinMind network error for ${code} after ${attempt} attempts`);
+      await sleep(FINMIND_RETRY_DELAYS_MS[attempt - 1]);
+      continue;
+    }
+    if (response.ok) return response;
+    const retryable = response.status === 429 || response.status >= 500;
+    if (retryable && attempt < FINMIND_MAX_ATTEMPTS) {
+      await sleep(FINMIND_RETRY_DELAYS_MS[attempt - 1]);
+      continue;
+    }
+    if (response.status === 429) throw new Error(`FinMind rate limit (HTTP 429) for ${code} after ${attempt} attempts`);
+    if (response.status >= 500) throw new Error(`FinMind server error (HTTP ${response.status}) for ${code} after ${attempt} attempts`);
+    throw new Error(`FinMind HTTP ${response.status} for ${code}`);
+  }
+  throw new Error(`FinMind request exhausted for ${code}`);
+}
+
+export async function finMindFundamentals(code, options = {}) {
   // Same dataset and field definitions used by index.html's existing computeJS().
-  // No token is embedded; a rate limit, schema change, or missing member fails
-  // the whole quarterly run before any output is written.
-  const start = `${new Date().getUTCFullYear() - 3}-01-01`;
-  const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockFinancialStatements&data_id=${encodeURIComponent(code)}&start_date=${start}`;
-  const response = await fetch(url, { headers: { 'user-agent': 'stock-scoreboard-snapshot/1.0' } });
-  if (!response.ok) throw new Error(`FinMind HTTP ${response.status} for ${code}`);
+  // A rate limit, schema change, or missing member fails the whole quarterly
+  // run before any output is written.  FINMIND_TOKEN is optional and never
+  // appears in output or errors.
+  const start = options.start || `${new Date().getUTCFullYear() - 3}-01-01`;
+  const url = finMindUrl(code, start);
+  const response = await fetchFinMindWithRetry(url, code, options);
   const body = await response.json();
   if (body.status !== 200 || !Array.isArray(body.data)) throw new Error(`FinMind data unavailable for ${code}`);
   return body.data;
@@ -140,10 +193,14 @@ export function buildCandidate(stocks, prices, asOf) {
 
 function validUntilFor(periodEnd) {
   const [year, month] = periodEnd.split('-').map(Number);
-  if (month === 3) return `${year}-05-15`;
-  if (month === 6) return `${year}-08-14`;
-  if (month === 9) return `${year}-11-14`;
-  if (month === 12) return `${year + 1}-03-31`;
+  // A completed quarter stays usable until the statutory deadline for the
+  // *following* quarter.  For example, Q1 2026 is the latest common basis
+  // until Q2 filings are due on 2026-08-14; it does not turn stale on the day
+  // Q1 itself became due (2026-05-15).
+  if (month === 3) return `${year}-08-14`;
+  if (month === 6) return `${year}-11-14`;
+  if (month === 9) return `${year + 1}-03-31`;
+  if (month === 12) return `${year + 1}-05-15`;
   return null;
 }
 
@@ -152,39 +209,88 @@ function statementValues(rows, type) {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
+function quarterEndsEndingAt(periodEnd, count = 8) {
+  const match = String(periodEnd).match(/^(\d{4})-(03-31|06-30|09-30|12-31)$/);
+  if (!match) return null;
+  let year = Number(match[1]);
+  let quarter = ['03-31', '06-30', '09-30', '12-31'].indexOf(match[2]);
+  const periods = [];
+  for (let i = 0; i < count; i += 1) {
+    periods.push(`${year}-${['03-31', '06-30', '09-30', '12-31'][quarter]}`);
+    quarter -= 1;
+    if (quarter < 0) { quarter = 3; year -= 1; }
+  }
+  return periods.reverse();
+}
+
+function valuesByPeriod(rows, type) {
+  const values = new Map();
+  const conflicts = new Set();
+  for (const row of statementValues(rows, type)) {
+    const value = num(row.value);
+    if (values.has(row.date) && values.get(row.date) !== value) conflicts.add(row.date);
+    values.set(row.date, value);
+  }
+  return { values, conflicts };
+}
+
+function completePeriods(values, conflicts, count = 8) {
+  const available = new Set();
+  for (const periodEnd of values.keys()) {
+    const periods = quarterEndsEndingAt(periodEnd, count);
+    if (periods && periods.every(period => values.has(period) && !conflicts.has(period))) available.add(periodEnd);
+  }
+  return available;
+}
+
+function commonLatestPeriod(required, rowsByCode) {
+  const availability = required.map(stock => {
+    const code = String(stock.code || '').padStart(4, '0');
+    const { values, conflicts } = valuesByPeriod(rowsByCode.get(code) || [], 'EPS');
+    return { stock, periods: completePeriods(values, conflicts) };
+  });
+  const withoutEightQuarters = availability.filter(item => item.periods.size === 0).map(item => `${item.stock.name || item.stock.code}(${item.stock.code || '無代號'})`);
+  if (withoutEightQuarters.length) throw new Error(`fundamental coverage failed: EPS找不到完整連續8季的股票：${withoutEightQuarters.join(', ')}`);
+  const shared = [...availability[0].periods].filter(period => availability.every(item => item.periods.has(period))).sort().reverse();
+  if (!shared.length) throw new Error(`fundamental coverage failed: ${required.length} 檔非ETF沒有共同完整8季EPS期末`);
+  return shared[0];
+}
+
 // This is intentionally the same EPS/AK definition as index.html computeJS:
 // latest 4 EPS versus prior 4 EPS; AK is null where prior-period EPS <= 0.
 export function buildFundamentalsCandidate(stocks, rowsByCode, asOf) {
+  const required = stocks.filter(stock => stock.type !== 'etf');
+  const periodEnd = commonLatestPeriod(required, rowsByCode);
+  const periods = quarterEndsEndingAt(periodEnd);
+  const latest4Periods = periods.slice(-4);
+  const prior4Periods = periods.slice(0, 4);
   const missing = [];
-  const latestPeriods = [];
   const updated = stocks.map(stock => {
     if (stock.type === 'etf') return stock; // Existing system has no EPS/AK for ETF.
     const code = String(stock.code || '').padStart(4, '0');
     const rows = rowsByCode.get(code);
-    const eps = statementValues(rows || [], 'EPS');
-    if (eps.length < 8) { missing.push(`${stock.name || code}(${code || '無代號'}): EPS不足8季`); return stock; }
-    const last8 = eps.slice(-8), latest4 = last8.slice(-4), prior4 = last8.slice(0, 4);
-    const periodEnd = latest4[latest4.length - 1].date;
-    const prior = prior4.reduce((sum, row) => sum + num(row.value), 0);
-    const current = latest4.reduce((sum, row) => sum + num(row.value), 0);
+    const eps = valuesByPeriod(rows || [], 'EPS');
+    if (periods.some(period => !eps.values.has(period) || eps.conflicts.has(period))) { missing.push(`${stock.name || code}(${code || '無代號'}): 共同期EPS不完整`); return stock; }
+    const prior = prior4Periods.reduce((sum, period) => sum + eps.values.get(period), 0);
+    const current = latest4Periods.reduce((sum, period) => sum + eps.values.get(period), 0);
     const ak = prior > 0 ? +(current / prior - 1).toFixed(4) : null;
-    const next = { ...stock, q1: +num(latest4[0].value).toFixed(2), q2: +num(latest4[1].value).toFixed(2), q3: +num(latest4[2].value).toFixed(2), q4: +num(latest4[3].value).toFixed(2), AK: ak };
-    const income = statementValues(rows, 'IncomeAfterTaxes');
-    const revenue = statementValues(rows, 'Revenue');
-    if (income.length >= 4 && revenue.length >= 4) {
-      const ni = income.slice(-4).reduce((sum, row) => sum + num(row.value), 0);
-      const rev = revenue.slice(-4).reduce((sum, row) => sum + num(row.value), 0);
+    const next = { ...stock, q1: +eps.values.get(latest4Periods[0]).toFixed(2), q2: +eps.values.get(latest4Periods[1]).toFixed(2), q3: +eps.values.get(latest4Periods[2]).toFixed(2), q4: +eps.values.get(latest4Periods[3]).toFixed(2), AK: ak };
+    const income = valuesByPeriod(rows || [], 'IncomeAfterTaxes');
+    const revenue = valuesByPeriod(rows || [], 'Revenue');
+    // AA must use the same common four quarters as EPS.  If a financial
+    // statement does not expose revenue, leave its existing AA untouched;
+    // do not pull a newer, incompatible four-quarter window.
+    if (latest4Periods.every(period => income.values.has(period) && revenue.values.has(period) && !income.conflicts.has(period) && !revenue.conflicts.has(period))) {
+      const ni = latest4Periods.reduce((sum, period) => sum + income.values.get(period), 0);
+      const rev = latest4Periods.reduce((sum, period) => sum + revenue.values.get(period), 0);
       // Keep index.html computeJS() semantics: a zero TTM net income does not
       // overwrite AA with a misleading 0; it remains unavailable/unchanged.
       if (ni && rev > 0) next.AA = +(ni / rev * 100).toFixed(2);
     }
-    latestPeriods.push(periodEnd);
     return next;
   });
   if (missing.length) throw new Error(`fundamental coverage failed (${missing.length}/${stocks.length}): ${missing.join(', ')}`);
-  const uniquePeriods = [...new Set(latestPeriods)];
-  if (uniquePeriods.length !== 1) throw new Error(`fundamental period mismatch: ${uniquePeriods.join(', ')}`);
-  const periodEnd = uniquePeriods[0], validUntil = validUntilFor(periodEnd);
+  const validUntil = validUntilFor(periodEnd);
   if (!validUntil || asOf > validUntil) throw new Error(`latest financial period ${periodEnd} is no longer valid after ${validUntil}`);
   const medAK = median(updated.map(stock => num(stock.AK)));
   if (medAK == null) throw new Error('EPS growth median missing after validation');
@@ -255,6 +361,8 @@ async function main() {
   };
   if (dryRun) {
     console.log(`DRY RUN OK: target=${target}, stocks=${stocks.length}, date=${requestedDate}`);
+    if (target === 'price' || target === 'both') console.log(`PRICE: coverage=${priceMeta.coverage}, medCheap=${priceMeta.medCheap}`);
+    if (target === 'fundamentals' || target === 'both') console.log(`FUNDAMENTALS: coverage=${fundamentals.coverage}, periodEnd=${fundamentals.periodEnd}, validUntil=${fundamentals.validUntil}, medAK=${fundamentals.medAK}`);
     console.log('No files were changed. Re-run with --write only after reviewing this output.');
     return;
   }
