@@ -138,6 +138,7 @@ function renderAll(D){
 
 // ===== 資料來源、時區與新鮮度 =====
 const TP_TZ='Asia/Taipei';
+const POOL_SIZE=59; // ⚠ 股票池檔數:變更時 index.html 的 DEFAULT_DATA、此常數、scripts/update-stock-pool.mjs 三處須一致
 const STATE_TEXT={latest:'最新可用日資料',snapshot:'快照',stale:'已過期',unavailable:'暫無資料'};
 const STOCK_PRICE_MAX_TRADING_DAYS=3;
 function taipeiParts(value){
@@ -523,7 +524,7 @@ async function loadCanonicalStockSnapshot(){
     const r=await fetch('data/stock-pool-snapshot.json',{cache:'no-store'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     const s=await r.json();
-    if(s.schemaVersion!==1||!Array.isArray(s.stocks)||s.stocks.length!==59)throw new Error('schema or stock count');
+    if(s.schemaVersion!==1||!Array.isArray(s.stocks)||s.stocks.length!==POOL_SIZE)throw new Error('schema or stock count');
     CANONICAL_STOCK_POOL={price:s.price||{},fundamentals:s.fundamentals||{}};
     STOCK_POOL=stockPoolInfo();
   }catch(e){/* Safe fallback: keep the embedded morning snapshot. */}
