@@ -45,7 +45,10 @@ assert.deepEqual(
   'canonical EPS values must carry the four exact FinMind source quarters for index.html safety gate'
 );
 assert.throws(() => buildFundamentalsCandidate(fundamentalStocks, new Map([['2330', epsRows(eightDates.slice(1))]]), '2026-05-10'));
-assert.throws(() => buildFundamentalsCandidate(fundamentalStocks, new Map([['2330', epsRows(eightDates)]]), '2026-08-15'));
+const carriedForwardFundamentals = buildFundamentalsCandidate(fundamentalStocks, new Map([['2330', epsRows(eightDates)]]), '2026-08-15');
+assert.equal(carriedForwardFundamentals.periodEnd, '2026-03-31');
+assert.equal(carriedForwardFundamentals.validUntil, '2026-08-14');
+assert.equal(carriedForwardFundamentals.updated[0].q4Period, '2026Q1', 'last complete financial window remains usable after the next filing deadline');
 const zeroIncome = epsRows(eightDates).map(row => row.type === 'IncomeAfterTaxes' ? { ...row, value: 0 } : row);
 assert.equal(buildFundamentalsCandidate([{ ...fundamentalStocks[0], AA: 7 }], new Map([['2330', zeroIncome]]), '2026-05-10').updated[0].AA, 7, 'AA=0 must preserve existing value like computeJS');
 
@@ -127,4 +130,16 @@ await assert.rejects(() => atomicWriteJson(snapshotFile, { next: true }, { failB
 assert.equal(await fs.readFile(snapshotFile, 'utf8'), '{"old":true}\n');
 await atomicWriteJson(snapshotFile, { schemaVersion: 1, next: true });
 assert.deepEqual(JSON.parse(await fs.readFile(snapshotFile, 'utf8')), { schemaVersion: 1, next: true });
-console.log('FIXTURE TEST OK: official TWSE/TPEx parsing, ROC TPEx URL, price/fundamental formulas, common-quarter alignment/rejection, safe FinMind token/retry, AA=0 preservation, all-or-nothing coverage, and atomic snapshot replacement');
+
+const [indexHtml, morningHtml] = await Promise.all([
+  fs.readFile(new URL('../index.html', import.meta.url), 'utf8'),
+  fs.readFile(new URL('../morning.html', import.meta.url), 'utf8')
+]);
+assert.match(indexHtml, /最後完整資料照此日期計算，非即時報價/);
+assert.match(indexHtml, /dataInsufficient = s\.epsInsufficient===true \|\| !hasFourEPS/);
+assert.doesNotMatch(indexHtml, /dataStale = !hasProv/);
+assert.match(morningHtml, /meta\.state='snapshot';/);
+assert.match(morningHtml, /資料截至 /);
+assert.match(morningHtml, /if\(metaUsable\(meta\.index\)&&metaUsable\(meta\.margin\)/);
+assert.doesNotMatch(morningHtml, /股價已過期|財報已過有效期限/);
+console.log('FIXTURE TEST OK: official TWSE/TPEx parsing, ROC TPEx URL, price/fundamental formulas, common-quarter alignment/rejection, last-complete snapshot carry-forward, safe FinMind token/retry, AA=0 preservation, atomic snapshot replacement, and dated snapshot UI policy');

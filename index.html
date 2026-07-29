@@ -91,6 +91,7 @@ details.logic td,details.logic th{border:1px solid var(--line);padding:4px 8px;f
 <header>
   <h1>存股評分表 <span style="font-size:13px;color:var(--sub);font-weight:400">稅效退稅 + 高點防災</span> <span style="font-size:11px;background:#1d2733;color:#fff;border-radius:10px;padding:2px 8px;vertical-align:2px">版本 2026-07-17b</span></h1>
   <div class="sub">總分 = 稅效股利 + 填息力 + 防禦抗跌 + 品質,四支柱權重可用下方滑桿自己調。每項先換成固定級距分數再加權,單一項目不會主導。買進訊號要求「不貴」——高點時系統傾向叫你等,而不是追。<b>點任一檔的「建議」標籤</b>會彈出行動卡:該買/賣的價位、判斷理由、你的部位與稅務提醒。</div>
+  <div class="sub" id="pool-source">股票池資料載入中…</div>
 </header>
 
 <div class="gauge" id="gauge"></div>
@@ -374,8 +375,7 @@ function renderGauge(){
 function etfComplete(s){
   return nn(s.J)!=null && !!s.Jdate
     && nn(s.div1)!=null && nn(s.avgYld5)!=null
-    && nn(s.fillRate)!=null && nn(s.vol)!=null && nn(s.mdd)!=null
-    && !!s.etfUpdatedAt;
+    && nn(s.fillRate)!=null && nn(s.vol)!=null && nn(s.mdd)!=null;
 }
 // ── 完整更新原子化驗證:候選資料逐類必要性檢查,任一失敗即不 commit(見 updateStock) ──
 // type='etf' 跳過 EPS 要求並改驗 ETF 必要欄位;空股利陣列一律視為 API失敗/缺漏(不得沿用舊衍生值解閘)
@@ -425,20 +425,21 @@ function score(s){
   const cheap=nn(s.cheap),fillR=nn(s.fillRate),yE=nn(s.divYldEarn);
   const ds=divState(s);
   const st=STANCE[G.zone], trend=G.trend||'intact';
-  // ── 訊號安全閘 ──
-  // 有真實來源期間(跑過完整更新、公司行動已正規化)才發訊號;內建靜態/未正規化 → 資料待更新,禁買賣減碼與價格帶
-  // ETF 用獨立完整性規則(不要求公司 EPS/ROE/淨利率);一般股用連續四季 EPS 來源判斷
+  // ── 資料完整性 ──
+  // 已知最後一份完整資料可照常計算；畫面以資料截至日揭露，而非把舊
+  // 快照偽稱即時。只有缺少必要數值或明確驗證失敗時才停發訊號。
+  // ETF 用獨立完整性規則(不要求公司 EPS/ROE/淨利率);一般股用連續四季 EPS 判斷。
   let dataInsufficient, dataStale;
   if(etf){
     const complete = etfComplete(s);
-    dataStale = !s.etfUpdatedAt && !complete;      // 從未完整更新且不完整 → 待更新
-    dataInsufficient = !complete && !dataStale;    // 更新過但缺必要 ETF 欄位 → 資料不足
+    dataStale = false;
+    dataInsufficient = !complete;
   } else {
-    const hasProv = !!s.q1Period && s.epsInsufficient!==true;
-    dataInsufficient = s.epsInsufficient===true;                     // 更新過但組不出連續四季
-    dataStale = !hasProv && !dataInsufficient;                       // 從未更新(靜態/國巨未正規化)
+    const hasFourEPS = qs.every(v=>v!=null);
+    dataInsufficient = s.epsInsufficient===true || !hasFourEPS;
+    dataStale = false;
   }
-  const noSignal = dataInsufficient || dataStale || cheap==null;      // 任一 → 禁訊號與價格帶
+  const noSignal = dataInsufficient || cheap==null;                   // 缺值或驗證失敗才禁訊號與價格帶
   const etfTaxUnknown = etf && nn(s.etfTaxCreditRatio)==null;         // ETF 可抵減比例未確認 → 稅效欄「待確認」,不得全額當可抵減股利
   // 最新兩季依 period 序判斷(不依固定欄名 q3/q4;跨年不判反)
   const per=[s.q1Period,s.q2Period,s.q3Period,s.q4Period];
@@ -452,8 +453,7 @@ function score(s){
   const fundamentalSell = !etf && (persistentLoss||roeBad||divBroken);
   const flags={dataInsufficient,dataStale,persistentLoss,roeBad,divBroken};
   let M;
-  if(dataStale) M='資料待更新';                                       // 靜態/未正規化 → 安全:不發任何訊號
-  else if(dataInsufficient||cheap==null) M='資料不足';
+  if(dataInsufficient||cheap==null) M='資料不足';
   else if(fundamentalSell) M='賣出';                                  // 只有基本面惡化才賣出
   else if(total<40) M='排除';                                         // 低分:排除/不加碼(非賣出)
   else if(G.zone==='hot'){
@@ -484,7 +484,7 @@ function score(s){
   let cheapP=null,fairP=null,expP=null,bandMode=null;
   if(bd&&ay){ cheapP=bd/(ay*1.3); fairP=bd/ay; expP=bd/(ay*0.9); bandMode='自身殖利率帶'; }
   else if(d5){ cheapP=d5*16; fairP=d5*20; expP=d5*25; bandMode='股利帶(近12月無配息,以5年均息估)'; }
-  if(noSignal){ cheapP=fairP=expP=null; bandMode=null; }              // 資料待更新/不足 → 不給價格帶
+  if(noSignal){ cheapP=fairP=expP=null; bandMode=null; }              // 缺值／驗證失敗 → 不給價格帶
   const farBand=(cheapP&&nn(s.J))?(1-cheapP/s.J)>0.6:false; // 便宜價距現價太遠=不在存股射程
   return {ttmEPS,payout,sub,total,items,M,cheapP,fairP,expP,bandMode,farBand,flags,ds,noSignal,etf,taxUnknown:etfTaxUnknown};
 }
@@ -504,12 +504,12 @@ function epsInfo(s,c){
   if((s.type||'')==='etf') return {badge:'', title:'ETF 無公司 EPS(以收益/防禦/填息評分)'};
   if(s.epsInsufficient) return {badge:' <span class="warn" title="無任何完整連續四季窗口">資料不足</span>', title:'EPS 無完整連續四季,資料不足'};
   const per=[s.q1Period,s.q2Period,s.q3Period,s.q4Period];
-  if(!per[0]) return {badge:' <span class="warn" title="尚未完整更新,無來源期間,預設不發交易訊號">待更新</span>', title:'近四季EPS '+fmt(c.ttmEPS)+'(來源期間需按「完整更新」取得;無期間一律不發訊號)'};
+  if(!per[0]) return {badge:' <span class="warn" title="來源季度未隨內嵌快照保存；仍以畫面標示的最後資料日計算">來源期未提供</span>', title:'近四季EPS '+fmt(c.ttmEPS)+'（來源季度未提供；使用最後內嵌資料快照計算，非即時資料）'};
   const val=[s.q1,s.q2,s.q3,s.q4];
   const lines=[0,1,2,3].map(i=>'Q'+(i+1)+' '+per[i]+' '+fmt(val[i],2));
   const behind=s.epsFallbackCount||0;
-  const title='連續四季 '+per[0]+'～'+per[3]+' · TTM '+fmt(c.ttmEPS)+' · '+lines.join(' · ')+(s.epsStale?' · 資料較舊(落後 '+behind+' 季,最新季尚未成完整窗)':'');
-  const badge=s.epsStale?' <span class="warn" title="目前採用較舊的完整連續四季(最新季未成完整窗)">舊窗</span>':'';
+  const title='連續四季 '+per[0]+'～'+per[3]+' · TTM '+fmt(c.ttmEPS)+' · '+lines.join(' · ')+(s.epsStale?' · 採用最後完整四季窗口（最新季尚未成完整窗）':'');
+  const badge=s.epsStale?' <span class="warn" title="採用最後完整連續四季；資料日期請看頁首標示">最後完整窗</span>':'';
   return {badge, title};
 }
 function rowHTML(s,c){
@@ -521,7 +521,7 @@ function rowHTML(s,c){
     <td class="sc ${scCls(c.total)}">${c.total.toFixed(1)}</td>
     <td class="pillcell">${c.sub.tax==null?'—':c.sub.tax.toFixed(0)}</td><td class="pillcell">${c.sub.fill==null?'—':c.sub.fill.toFixed(0)}</td>
     <td class="pillcell">${c.sub.defense==null?'—':c.sub.defense.toFixed(0)}</td><td class="pillcell" title="${c.sub.quality==null?'ETF 無公司品質構面,不計入總分':''}">${c.sub.quality==null?'—':c.sub.quality.toFixed(0)}</td>
-    <td class="${band}" title="${s.Jdate?'報價日 '+s.Jdate:''}">${fmt(nn(s.J))}</td>
+    <td class="${band}" title="${s.Jdate?'資料截至 '+s.Jdate+'；非即時報價':''}">${fmt(nn(s.J))}</td>
     <td class="${nn(s.cheap)!=null?(s.cheap>=1?'ok':(s.cheap<0.8?'bad':'')):''}">${nn(s.cheap)!=null?s.cheap.toFixed(2):'—'}</td>
     <td class="${!c.taxUnknown&&z(s.divYldEarn)>=0.05?'pos':''}">${c.taxUnknown?'<span class="warn" title="ETF 配息含資本利得/利息/境外所得等,可適用 8.5% 抵減的比例待確認,勿全額視為可抵稅">待確認</span>':pct(nn(s.divYldEarn))}</td>
     <td>${pct(nn(s.divYldAll))}</td>
@@ -947,8 +947,21 @@ document.getElementById('reset').addEventListener('click',()=>{if(confirm('會�
   deletedCodes=[];saveDeleted(); stocks=JSON.parse(JSON.stringify(DEFAULT_DATA)); openIdx=null; save(); render();
 }});
 document.getElementById('export').addEventListener('click',()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(stocks,null,1)],{type:'application/json'}));a.download='存股評分.json';a.click();});
-// 更新器只寫這一份 canonical;缺失/無效/抓不到 → 螢幕維持內嵌 DEFAULT_DATA(安全退回)。
-// 註:canonical 的 stocks 需含安全閘所需的來源期間(q1Period..),否則載入後仍判「資料待更新」——見交付說明。
+function stockPoolSourceText(snapshot){
+  const priceDate=snapshot&&snapshot.price&&snapshot.price.asOf;
+  const fallbackDate=stocks.map(s=>s.Jdate).filter(Boolean).sort().pop();
+  const fundamentals=snapshot&&snapshot.fundamentals||{};
+  const epsDate=fundamentals.periodEnd||fundamentals.asOf||null;
+  const priceText=priceDate||fallbackDate||'未提供';
+  const epsText=epsDate||'內嵌快照（季度期別未提供）';
+  return '股票池：股價資料截至 '+priceText+'；財報／EPS資料截至 '+epsText+'。最後完整資料照此日期計算，非即時報價。';
+}
+function renderStockPoolSource(snapshot){
+  const el=document.getElementById('pool-source');
+  if(el)el.textContent=stockPoolSourceText(snapshot);
+}
+// 更新器只寫這一份 canonical;抓取或驗證失敗時不覆寫舊檔，畫面維持最後
+// 一份完整 canonical；沒有 canonical 時才使用內嵌 DEFAULT_DATA。
 async function loadCanonicalStockSnapshot(){
   try{
     const r=await fetch('data/stock-pool-snapshot.json',{cache:'no-store'});
@@ -958,9 +971,10 @@ async function loadCanonicalStockSnapshot(){
     stocks=s.stocks;
     if(s.fundamentals&&Number.isFinite(Number(s.fundamentals.medAK)))MARKET={...MARKET,medAK:Number(s.fundamentals.medAK)};
     render();
+    renderStockPoolSource(s);
   }catch(e){/* Safe fallback: embedded data/local user data stays in use. */}
 }
-syncW(); bindW(); render(); loadCanonicalStockSnapshot();
+syncW(); bindW(); render(); renderStockPoolSource(null); loadCanonicalStockSnapshot();
 </script>
 </body>
 </html>

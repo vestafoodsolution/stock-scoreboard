@@ -190,10 +190,10 @@ export function buildCandidate(stocks, prices, asOf) {
 
 function validUntilFor(periodEnd) {
   const [year, month] = periodEnd.split('-').map(Number);
-  // A completed quarter stays usable until the statutory deadline for the
-  // *following* quarter.  For example, Q1 2026 is the latest common basis
-  // until Q2 filings are due on 2026-08-14; it does not turn stale on the day
-  // Q1 itself became due (2026-05-15).
+  // This records the next statutory reporting deadline for readers.  It is
+  // not a deletion deadline: a later failed fetch must leave the last complete
+  // financial snapshot available, clearly dated, rather than inventing newer
+  // figures or replacing it with a partial result.
   if (month === 3) return `${year}-08-14`;
   if (month === 6) return `${year}-11-14`;
   if (month === 9) return `${year + 1}-03-31`;
@@ -306,7 +306,7 @@ export function buildFundamentalsCandidate(stocks, rowsByCode, asOf) {
   });
   if (missing.length) throw new Error(`fundamental coverage failed (${missing.length}/${stocks.length}): ${missing.join(', ')}`);
   const validUntil = validUntilFor(periodEnd);
-  if (!validUntil || asOf > validUntil) throw new Error(`latest financial period ${periodEnd} is no longer valid after ${validUntil}`);
+  if (!validUntil) throw new Error(`invalid financial period ${periodEnd}`);
   const medAK = median(updated.map(stock => num(stock.AK)));
   if (medAK == null) throw new Error('EPS growth median missing after validation');
   return { updated, medAK: +medAK.toFixed(4), periodEnd, validUntil };

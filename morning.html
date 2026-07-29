@@ -89,7 +89,7 @@ footer{margin-top:36px;font-size:11.5px;color:var(--sub);line-height:1.7;border-
 <h2>近期晨報</h2>
 <div class="hist" id="hist"></div>
 
-<footer>本頁呈現最新已發布的晨報快照；自動快照排程尚未啟用。所有數字來自公開資料（FinMind、CoinGecko 與每日快照）；每項數字均標示資料狀態與資料日。預測以情境與觸發條件表達，不構成投資建議；過期或暫無資料不納入命中判定。
+<footer>本頁呈現最新已發布的晨報快照；自動快照排程尚未啟用。所有數字來自公開資料（FinMind、CoinGecko 與每日快照）；每項數字均標示資料來源與資料截至日。預測以情境與觸發條件表達，不構成投資建議；暫無資料不納入命中判定。
 <br><br>頭像：Munger © Nick（CC BY 2.0）、Dalio © Web Summit（CC BY 2.0）、Marks © kellywritershouse（CC BY 2.0）、Kostolany © Bennys Buidl Fabrik（CC BY-SA 4.0）、Buffett（U.S. ITA）與 Graham 為公共領域；以上為 Wikimedia Commons 授權照片之素描化衍生作品。彼得・林區為使用者提供之素描肖像。</footer>
 </div>
 
@@ -139,7 +139,7 @@ function renderAll(D){
 // ===== 資料來源、時區與新鮮度 =====
 const TP_TZ='Asia/Taipei';
 const POOL_SIZE=59; // ⚠ 股票池檔數:變更時 index.html 的 DEFAULT_DATA、此常數、scripts/update-stock-pool.mjs 三處須一致
-const STATE_TEXT={latest:'最新可用日資料',snapshot:'快照',stale:'已過期',unavailable:'暫無資料'};
+const STATE_TEXT={latest:'最新可用日資料',snapshot:'資料快照',stale:'資料快照',unavailable:'暫無資料'};
 const STOCK_PRICE_MAX_TRADING_DAYS=3;
 function taipeiParts(value){
   const p={};
@@ -185,7 +185,9 @@ function makeMeta(source,asOf,fetchedAt,kind,maxDays,errorType){
   if(!meta.asOf)return meta;
   const age=tradingDaysSince(meta.asOf);
   meta.ageTradingDays=age;
-  meta.state=age!=null&&age>(maxDays==null?3:maxDays)?'stale':(kind==='snapshot'||kind==='stock-price'?'snapshot':'latest');
+  // 資料日超過更新目標時仍保留為快照：使用最後一份完整資料計算，
+  // 並讓讀者從「資料截至」判斷時效，絕不把它寫成即時。
+  meta.state=age!=null&&age>(maxDays==null?3:maxDays)?'snapshot':(kind==='snapshot'||kind==='stock-price'?'snapshot':'latest');
   return meta;
 }
 function unavailableMeta(source,fetchedAt,errorType){return makeMeta(source,null,fetchedAt,null,null,errorType);}
@@ -200,34 +202,35 @@ function makeStockPriceMeta(source,asOf,calendarResult,now){
     meta.lastCompletedTradingDate=completed;
     meta.ageTradingDays=calendarTradingDaysSince(meta.asOf,completed,dates);
   }else{
-    // 日曆失敗時僅以平日估算；遇休市日會偏舊，不會把資料誤升級成最新。
+  // 日曆失敗時僅以平日估算；遇休市日會偏舊，但仍明確以資料截至日呈現。
     meta.fallbackLastCompletedWeekday=lastCompletedWeekday(now);
     meta.ageTradingDays=weekdayTradingDaysSince(meta.asOf,meta.fallbackLastCompletedWeekday);
   }
   if(meta.ageTradingDays==null){meta.state='unavailable';meta.errorType=meta.errorType||'schema';return meta;}
-  meta.state=meta.ageTradingDays>STOCK_PRICE_MAX_TRADING_DAYS?'stale':'snapshot';
+  meta.state='snapshot';
   return meta;
 }
 function makeQuarterlyMeta(source,asOf,periodEnd,validUntil,fetchedAt,errorType){
   const meta={source:source||'未提供來源',asOf:validDate(asOf)?asOf:null,periodEnd:validDate(periodEnd)?periodEnd:null,validUntil:validDate(validUntil)?validUntil:null,fetchedAt:fetchedAt||null,kind:'quarterly',state:'unavailable',errorType:errorType||null};
-  // 財報不以三個交易日判死：必須同時知道財報期間與本次快照設定的有效期限，才可安全使用。
-  if(!meta.asOf||!meta.periodEnd||!meta.validUntil){meta.errorType=meta.errorType||'missing_fundamental_date';return meta;}
-  meta.state=taipeiDate()>meta.validUntil?'stale':'snapshot';
+  // 季報可沿用最後一份完整資料；期間或下次法定期限缺漏時，仍揭露
+  // 所知的資料截至日，不將未知資訊假裝成新一期財報。
+  if(!meta.asOf){meta.errorType=meta.errorType||'missing_fundamental_date';return meta;}
+  meta.state='snapshot';
   return meta;
 }
 function errorText(type){return {quota:'額度限制',network:'連線或 CORS 問題',http:'HTTP 回應錯誤',server:'資料服務錯誤',empty:'來源無資料',schema:'資料格式不符',parse:'回應無法解析',missing_price_date:'股價資料日未提供，不能確認',missing_fundamental_date:'財報日期未提供，不能確認'}[type]||'未知錯誤';}
 function stateText(meta){
-  if(meta&&meta.kind==='stock-price')return {latest:'股價最新可用日資料',snapshot:'股價快照可用',stale:'股價已過期',unavailable:'股價暫無資料'}[meta.state]||'股價暫無資料';
-  if(meta&&meta.kind==='quarterly')return {snapshot:'財報有效期內',stale:'財報已過有效期限',unavailable:'財報狀態無法確認'}[meta.state]||'財報狀態無法確認';
+  if(meta&&meta.kind==='stock-price')return {latest:'股價最新可用日資料',snapshot:'股價資料快照',stale:'股價資料快照',unavailable:'股價暫無資料'}[meta.state]||'股價暫無資料';
+  if(meta&&meta.kind==='quarterly')return {snapshot:'財報／EPS資料快照',stale:'財報／EPS資料快照',unavailable:'財報狀態無法確認'}[meta.state]||'財報狀態無法確認';
   return STATE_TEXT[meta&&meta.state]||'暫無資料';
 }
 function metaText(meta,showFetched){
   const out=[stateText(meta),meta.source];
-  if(meta.asOf)out.push('資料日 '+meta.asOf);
+  if(meta.asOf)out.push('資料截至 '+meta.asOf);
   if(meta&&meta.kind==='stock-price'&&meta.calendarState==='confirmed')out.push('最後完成交易日 '+meta.lastCompletedTradingDate);
   if(meta&&meta.kind==='stock-price'&&meta.calendarState!=='confirmed')out.push('交易日曆暫無法確認'+(meta.calendarErrorType&&meta.calendarErrorType!=='pending'?'（'+errorText(meta.calendarErrorType)+'）':''));
   if(meta&&meta.kind==='quarterly'&&meta.periodEnd)out.push('財報期間 '+meta.periodEnd);
-  if(meta&&meta.kind==='quarterly'&&meta.validUntil)out.push('有效至 '+meta.validUntil);
+  if(meta&&meta.kind==='quarterly'&&meta.validUntil)out.push('下次法定申報期限 '+meta.validUntil);
   if(showFetched&&meta.fetchedAt)out.push('讀取 '+meta.fetchedAt+'（台北）');
   if(meta.state==='unavailable'&&meta.errorType)out.push(errorText(meta.errorType));
   return out.join(' · ');
@@ -265,8 +268,8 @@ function inferStockPriceAsOf(){
 let CANONICAL_STOCK_POOL=null;
 function stockPoolInfo(calendarResult){
   const explicit=CANONICAL_STOCK_POOL||(BRIEF.sourceMeta&&BRIEF.sourceMeta.stockPool?BRIEF.sourceMeta.stockPool:{});
-  // 新快照格式：price.asOf 每日更新；fundamentals 需附財報期間與有效期限（季更）。
-  // 舊格式的 asOf 僅可視為「價格」資料日，絕不推定為財報／EPS 資料日。
+  // 新快照格式記錄股價日與財報期末；舊 canonical 仍可使用其最後完整
+  // 快照，但只能標成快照資料截至日，不能冒充新一期財報。
   const price=explicit.price||{};
   const fundamentals=explicit.fundamentals||explicit.fundamental||{};
   const item=snapItem('股票池','便宜度');
@@ -274,7 +277,8 @@ function stockPoolInfo(calendarResult){
   const medAK=numberOrNull(fundamentals.medAK!=null?fundamentals.medAK:explicit.medAK);
   const priceAsOf=price.asOf||explicit.priceAsOf||explicit.asOf||inferStockPriceAsOf();
   const priceMeta=makeStockPriceMeta(price.source||explicit.priceSource||explicit.source||'晨報股票池股價快照',priceAsOf,calendarResult);
-  const fundamentalsMeta=makeQuarterlyMeta(fundamentals.source||explicit.fundamentalsSource||'晨報股票池財報／EPS快照',fundamentals.asOf||explicit.fundamentalsAsOf,fundamentals.periodEnd||explicit.fundamentalPeriodEnd,fundamentals.validUntil||explicit.fundamentalValidUntil,null);
+  const snapshotAsOf=fundamentals.asOf||explicit.fundamentalsAsOf||priceAsOf;
+  const fundamentalsMeta=makeQuarterlyMeta(fundamentals.source||explicit.fundamentalsSource||'晨報股票池財報／EPS快照',snapshotAsOf,fundamentals.periodEnd||explicit.fundamentalPeriodEnd,fundamentals.validUntil||explicit.fundamentalValidUntil,null);
   return {medCheap:med,medAK:medAK,priceMeta:priceMeta,fundamentalsMeta:fundamentalsMeta};
 }
 let STOCK_POOL=stockPoolInfo();
@@ -370,7 +374,7 @@ function computeMarket(idx,mar,fx,cg,stock,meta){
     L.t_val=Math.round(base-credit);
   }
   const stockUsable=stock&&stockValuationUsable(stock);
-  if(meta.index.state==='latest'&&meta.margin.state==='latest'&&stockUsable&&hasNum(L.t_dev)&&hasNum(L.t_lev)&&hasNum(L.t_val)){
+  if(metaUsable(meta.index)&&metaUsable(meta.margin)&&stockUsable&&hasNum(L.t_dev)&&hasNum(L.t_lev)&&hasNum(L.t_val)){
     L.total=Math.round(((L.t_dev+L.t_lev+L.t_val)/3)*10)/10;
     L.zone=L.total<25?'低溫（悲觀期）':L.total<50?'回溫（懷疑期）':L.total<75?'偏熱（樂觀期）':'過熱（亢奮期）';
   }
@@ -399,8 +403,8 @@ function stockPoolIssueText(stock){
 }
 function temperatureReason(meta,stock){
   const missing=[];
-  if(meta.index.state!=='latest')missing.push('台股指數非最新可用日資料');
-  if(meta.margin.state!=='latest')missing.push('融資非最新可用日資料');
+  if(!metaUsable(meta.index))missing.push('台股指數暫無可計算資料');
+  if(!metaUsable(meta.margin))missing.push('融資暫無可計算資料');
   if(!stockValuationUsable(stock)||!hasNum(stock.medCheap)||!hasNum(stock.medAK))missing.push(stockPoolIssueText(stock));
   return missing.join('；');
 }
@@ -420,10 +424,10 @@ function safeMembers(L,meta,stock){
   return BRIEF.members.map(function(member){
     let text='';
     if(member.id==='marks')text='台股指數為'+metaShort(indexMeta)+'。'+totalText+(L.trendTxt?'；趨勢燈 '+L.trendTxt+'。':'。')+'資料不足時不以舊溫度替代。';
-    else if(member.id==='kost')text='融資為'+metaShort(marginMeta)+'；美元／台幣為'+metaShort(fxMeta)+'。'+(hasNum(L.marPeak)?'融資距峰值 '+pcs(L.marPeak)+'，僅供該資料日判讀。':'不對籌碼強弱作即時判斷。');
+    else if(member.id==='kost')text='融資為'+metaShort(marginMeta)+'；美元／台幣為'+metaShort(fxMeta)+'。'+(hasNum(L.marPeak)?'融資距峰值 '+pcs(L.marPeak)+'，僅依各自資料截至日判讀。':'不對籌碼強弱作即時判斷。');
     else if(member.id==='lynch')text='全球指數使用'+metaShort(STATIC_META.global)+'。這是每日快照，不把它寫成盤中或最新市場判斷。';
     else if(member.id==='dalio')text='加密貨幣為'+metaShort(cryptoMeta)+'；VIX、美元與美債使用'+metaShort(STATIC_META.risk)+'。資料不是同一時間點，不下即時風險結論。';
-    else if(member.id==='graham')text='股票池估值資料：'+stockPoolMetaText(stock)+'。'+(stockValuationUsable(stock)&&hasNum(stock.medCheap)&&hasNum(stock.medAK)?'便宜度中位數 '+stock.medCheap.toFixed(2)+'，僅作該資料日的估值快照。':'估值不可用：'+stockPoolIssueText(stock)+'；已排除於溫度與預測判定。');
+    else if(member.id==='graham')text='股票池估值資料：'+stockPoolMetaText(stock)+'。'+(stockValuationUsable(stock)&&hasNum(stock.medCheap)&&hasNum(stock.medAK)?'便宜度中位數 '+stock.medCheap.toFixed(2)+'，僅作各資料截至日的估值快照。':'估值不可用：'+stockPoolIssueText(stock)+'；缺少必要數值時才無法計算。');
     else if(member.id==='buffett')text='股票池股價為'+metaShort(stock.priceMeta)+'；財報／EPS為'+metaShort(stock.fundamentalsMeta)+'。'+(stockPriceUsable(stock)?'不把可用快照價格當成盤中報價。':'股價資料不可用，不以它建議進出。');
     else text='規則先於敘事：'+totalText+'；台股為'+metaShort(indexMeta)+'；'+stockPoolMetaText(stock)+'。來源時間不同時，只提示資料限制，不延伸成即時結論。';
     return Object.assign({},member,{today:text});
@@ -434,18 +438,18 @@ function safeAlerts(meta,stock){
   const unavailable=['台股指數','融資','美元／台幣','加密貨幣'].filter(function(label,i){return [meta.index,meta.margin,meta.fx,meta.crypto][i].state==='unavailable';});
   if(unavailable.length)alerts.push({level:'warn',txt:'資料讀取異常：'+unavailable.join('、')+'。請依各項來源標示查看原因；只有明確標示「額度限制」才代表 FinMind 額度問題。'});
   if(!stockPriceUsable(stock))alerts.push({level:'warn',txt:'股票池股價：'+metaShort(stock.priceMeta)+'。價格敏感估值已從正式溫度、七人結論與相關預測驗證排除。'});
-  if(!stockFundamentalsUsable(stock))alerts.push({level:'warn',txt:'股票池財報／EPS：'+metaShort(stock.fundamentalsMeta)+'。財報不適用三個交易日門檻；目前因資料日期或有效期限無法確認，已不計入正式估值。'});
+  if(!stockFundamentalsUsable(stock))alerts.push({level:'warn',txt:'股票池財報／EPS：'+metaShort(stock.fundamentalsMeta)+'。缺少可辨識的資料截至日，暫無法納入估值。'});
   if(!hasNum(stock.medCheap))alerts.push({level:'warn',txt:'股票池便宜度中位數缺失；已從正式溫度、七人結論與相關預測驗證排除。'});
   if(!hasNum(stock.medAK))alerts.push({level:'warn',txt:'股票池快照未附 EPS 成長中位數；為符合評分表 v2，未計算正式總溫度。'});
-  if(!alerts.length)alerts.push({level:'warn',txt:'本頁同時包含最新可用日資料與每日快照；各項資料日不同，請以卡片標示為準。'});
+  if(!alerts.length)alerts.push({level:'warn',txt:'本頁同時包含最新可用日資料與每日快照；各項資料截至日不同，請以卡片標示為準。'});
   return alerts;
 }
 function safeOutlook(meta,stock){
   const status='台股 '+metaShort(displayMeta(meta.index,STATIC_META.taiwan))+'；融資 '+metaShort(displayMeta(meta.margin,STATIC_META.margin))+'；股票池 '+stockPoolMetaText(stock)+'。';
   return {
-    bull:{p:'暫停',txt:'本頁不將不同資料日的快照拼成一週偏多預測。',trigger:'待所有評分必要資料可安全計算後再發布'},
-    base:{p:'資料狀態',txt:status,trigger:'查看各來源的資料日與狀態'},
-    bear:{p:'風險管理',txt:'資料過期、缺值或來源失敗時，維持觀察，不用舊數字強作新結論。',trigger:'股價日更快照與財報季更資料均完整且有效'}
+    bull:{p:'暫停',txt:'本頁不將不同資料截至日的快照拼成一週偏多預測。',trigger:'待所有評分必要資料可安全計算後再發布'},
+    base:{p:'資料狀態',txt:status,trigger:'查看各來源的資料截至日與狀態'},
+    bear:{p:'風險管理',txt:'資料日期不同或來源讀取失敗時，沿用最後完整資料並標示資料截至日，不把它包裝成即時結論。',trigger:'確認各來源資料截至日是否仍適合你的判讀期間'}
   };
 }
 function buildMerged(L,meta,stock){
@@ -483,7 +487,7 @@ function buildMerged(L,meta,stock){
   poolGroup.items.forEach(function(item){
     item.sub=joinSub(item.sub,stockPoolMetaText(stock),stockValuationUsable(stock)&&hasNum(stock.medCheap)&&hasNum(stock.medAK)?'可納入正式估值':'不納入溫度／預測判定：'+stockPoolIssueText(stock));
   });
-  const headline=hasNum(L.total)?'依台股與融資最新可用日資料、股票池（'+stockPoolMetaText(stock)+'），正式溫度為 '+L.total+'／100（'+L.zone+'）。此為日資料判讀，非盤中即時報價。':'本頁未計算正式總溫度：'+temperatureReason(meta,stock)+'。股價以 3 個交易日檢查；財報依其季更有效期限檢查，不把快照或失敗資料包裝成最新判斷。';
+  const headline=hasNum(L.total)?'依台股與融資資料截至日、股票池（'+stockPoolMetaText(stock)+'），正式溫度為 '+L.total+'／100（'+L.zone+'）。此為各資料日的快照判讀，非盤中即時報價。':'本頁未計算正式總溫度：'+temperatureReason(meta,stock)+'。僅在必要數值缺失或來源無法辨識時停止計算；已有完整快照一律保留其資料截至日。';
   return Object.assign({},BRIEF,{renderedAt:taipeiTimestamp(),headline:headline,alerts:safeAlerts(meta,stock),groups:[stockGroup,moneyGroup,globalGroup,riskGroup,preGroup,poolGroup],members:safeMembers(L,meta,stock),outlook:safeOutlook(meta,stock),predictions:safePredictions(stock)});
 }
 function sourceStatus(label,live,fallback){return label+'：'+metaText(live,true)+(live.state==='unavailable'?'；畫面資料為 '+metaShort(fallback):'');}
