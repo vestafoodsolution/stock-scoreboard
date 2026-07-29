@@ -290,7 +290,7 @@ function score(s){
   let total=(sub.tax*W.tax+sub.fill*W.fill+sub.defense*W.defense+sub.quality*W.quality)/wsum;
   if(!fin&&!etf&&nn(s.roe)!=null&&s.roe<0.08) total=Math.min(total,55);
   const cheap=nn(s.cheap),fillR=nn(s.fillRate),yE=nn(s.divYldEarn);
-  const alFut=s.AL&&new Date(s.AL)>new Date();
+  const alFut=!!s.AL&&/^\d{4}-\d{2}-\d{2}$/.test(s.AL)&&s.AL>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()); // Asia/Taipei 今日字串比較:避免裝置時區偏差,且非 YYYY-MM-DD(如「未公布」)一律視為未來未成立
   const st=STANCE[G.zone], trend=G.trend||'intact';
   let M;
   if(epsNeg&&!etf)M='賣出';
