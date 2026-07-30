@@ -137,6 +137,9 @@ const [indexHtml, morningHtml] = await Promise.all([
 ]);
 assert.match(indexHtml, /最後完整資料照此日期計算，非即時報價/);
 assert.match(indexHtml, /dataInsufficient = s\.epsInsufficient===true \|\| !hasFourEPS/);
+assert.match(indexHtml, /const hasProv = !!s\.q1Period;/);
+assert.match(indexHtml, /dataPending = !hasProv;/);
+assert.match(indexHtml, /if\(dataPending\) M='資料待更新';/);
 assert.doesNotMatch(indexHtml, /dataStale = !hasProv/);
 assert.match(morningHtml, /meta\.state='snapshot';/);
 assert.match(morningHtml, /資料截至 /);

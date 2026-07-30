@@ -429,17 +429,21 @@ function score(s){
   // 已知最後一份完整資料可照常計算；畫面以資料截至日揭露，而非把舊
   // 快照偽稱即時。只有缺少必要數值或明確驗證失敗時才停發訊號。
   // ETF 用獨立完整性規則(不要求公司 EPS/ROE/淨利率);一般股用連續四季 EPS 判斷。
-  let dataInsufficient, dataStale;
+  let dataInsufficient, dataStale, dataPending=false;
   if(etf){
     const complete = etfComplete(s);
     dataStale = false;
     dataInsufficient = !complete;
   } else {
     const hasFourEPS = qs.every(v=>v!=null);
+    // 一般股必須帶更新器寫入的來源季度，才能證明四季 EPS 是同一套
+    // 可追溯資料；內嵌舊資料仍照常顯示，但不發買賣訊號。
+    const hasProv = !!s.q1Period;
+    dataPending = !hasProv;
     dataInsufficient = s.epsInsufficient===true || !hasFourEPS;
     dataStale = false;
   }
-  const noSignal = dataInsufficient || cheap==null;                   // 缺值或驗證失敗才禁訊號與價格帶
+  const noSignal = dataPending || dataInsufficient || cheap==null;    // 缺來源、缺值或驗證失敗才禁訊號與價格帶
   const etfTaxUnknown = etf && nn(s.etfTaxCreditRatio)==null;         // ETF 可抵減比例未確認 → 稅效欄「待確認」,不得全額當可抵減股利
   // 最新兩季依 period 序判斷(不依固定欄名 q3/q4;跨年不判反)
   const per=[s.q1Period,s.q2Period,s.q3Period,s.q4Period];
@@ -451,9 +455,10 @@ function score(s){
   const roeBad = nn(s.roe)!=null && s.roe<0;                          // 淨值報酬為負=品質惡化
   const divBroken = !etf && nn(s.div1)===0 && nn(s.div5)!=null && s.div5>0; // 曾配息今停配=股利政策破壞
   const fundamentalSell = !etf && (persistentLoss||roeBad||divBroken);
-  const flags={dataInsufficient,dataStale,persistentLoss,roeBad,divBroken};
+  const flags={dataPending,dataInsufficient,dataStale,persistentLoss,roeBad,divBroken};
   let M;
-  if(dataInsufficient||cheap==null) M='資料不足';
+  if(dataPending) M='資料待更新';
+  else if(dataInsufficient||cheap==null) M='資料不足';
   else if(fundamentalSell) M='賣出';                                  // 只有基本面惡化才賣出
   else if(total<40) M='排除';                                         // 低分:排除/不加碼(非賣出)
   else if(G.zone==='hot'){
