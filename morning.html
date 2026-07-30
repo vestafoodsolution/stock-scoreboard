@@ -14,8 +14,13 @@ header{padding:26px 0 6px;display:flex;align-items:baseline;gap:14px;flex-wrap:w
 h1{margin:0;font-size:21px;letter-spacing:.5px}
 .date{color:var(--sub);font-size:13px}
 nav a{font-size:12.5px;color:#1160c9;text-decoration:none;border:1px solid var(--line);border-radius:16px;padding:4px 12px;background:var(--card)}
-.headline{background:var(--accent);color:#fff;border-radius:14px;padding:18px 22px;font-size:16.5px;line-height:1.65;margin:14px 0 26px;text-wrap:balance}
+.headline{background:var(--accent);color:#fff;border-radius:14px;padding:18px 22px;margin:14px 0 26px;text-wrap:balance}
 .headline .tag{display:block;font-size:11px;letter-spacing:2px;color:#9aa7b5;margin-bottom:6px}
+.headline-main{display:flex;align-items:center;gap:18px}
+.headline-score{min-width:104px;font-size:58px;line-height:.92;font-weight:800;letter-spacing:-2px;font-variant-numeric:tabular-nums;color:#f6cf78}
+.headline-score .unit{display:block;margin-top:7px;font-size:11px;line-height:1;letter-spacing:0;color:#aeb8c4}
+.headline-score.hot{color:#ff6c61}.headline-score.cold{color:#6ee7a5}.headline-score.warm{color:#f6cf78}.headline-score.neutral{color:#d8dee6}
+.headline-copy{font-size:16.5px;line-height:1.65;flex:1}.headline-meta{margin-top:5px;color:#aeb8c4;font-size:11px;line-height:1.5}
 h2{font-size:14px;letter-spacing:1.5px;color:var(--sub);margin:30px 0 12px;text-transform:uppercase}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:10px}
 .tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 13px;position:relative}
@@ -56,7 +61,7 @@ h2{font-size:14px;letter-spacing:1.5px;color:var(--sub);margin:30px 0 12px;text-
 .badge.unavailable{background:#fdf6e3;color:#8a6500}
 .hist{font-size:12.5px;color:var(--sub);line-height:1.9}
 footer{margin-top:36px;font-size:11.5px;color:var(--sub);line-height:1.7;border-top:1px solid var(--line);padding-top:12px}
-@media(max-width:640px){.headline{font-size:15px}.members{grid-template-columns:1fr}}
+@media(max-width:640px){.headline-main{align-items:flex-start;gap:12px}.headline-score{min-width:78px;font-size:46px}.headline-copy{font-size:15px}.members{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -67,7 +72,7 @@ footer{margin-top:36px;font-size:11.5px;color:var(--sub);line-height:1.7;border-
   <nav style="margin-left:auto"><a href="./">📊 存股評分表</a></nav>
 </header>
 
-<div class="headline" id="headline"><span class="tag">本頁摘要</span><span id="headtxt"></span></div>
+<div class="headline" id="headline"><span class="tag">本頁摘要</span><div class="headline-main"><div class="headline-score neutral" id="headscore" hidden></div><div class="headline-copy"><span id="headtxt"></span><div class="headline-meta" id="headmeta"></div></div></div></div>
 <div id="livestat" style="font-size:11.5px;color:var(--sub);margin:-16px 0 18px;padding:0 4px"></div>
 
 <div id="alerts"></div>
@@ -103,9 +108,17 @@ const cls=v=>v==null?'fl':(v>0.0001?'up':v<-0.0001?'dn':'fl');
 
 // ===== 統一渲染(可傳入 BRIEF 或即時 merged)=====
 const ICONS={bull:['🟢','偏多情境'],base:['⚪','基準情境'],bear:['🔴','偏空情境']};
+function headlineTone(score){return score>=75?'hot':score<25?'cold':score==null?'neutral':'warm';}
 function renderAll(D){
   document.getElementById('bdate').textContent='晨報快照日 '+D.date+' · 檢視時間 '+(D.renderedAt||taipeiTimestamp())+'（台北）';
   document.getElementById('headtxt').textContent=D.headline;
+  const headscore=document.getElementById('headscore');
+  if(hasNum(D.summaryScore)){
+    headscore.hidden=false;
+    headscore.className='headline-score '+headlineTone(D.summaryScore);
+    headscore.innerHTML=Math.round(D.summaryScore)+'<span class="unit">／100</span>';
+  }else headscore.hidden=true;
+  document.getElementById('headmeta').textContent=D.summaryMeta||'';
   const alertsEl=document.getElementById('alerts');
   alertsEl.innerHTML=(D.alerts&&D.alerts.length)?'<div class="alerts">'+D.alerts.map(a=>`<div class="alert ${a.level==='warn'?'warn':''}">${a.level==='warn'?'🟡':'🔴'} ${a.txt}</div>`).join('')+'</div>':'';
   document.getElementById('tiles').innerHTML=D.groups.map(g=>`<h2 style="margin-top:18px">${g.name}</h2><div class="grid">`+
@@ -452,6 +465,12 @@ function safeOutlook(meta,stock){
     bear:{p:'風險管理',txt:'資料日期不同或來源讀取失敗時，沿用最後完整資料並標示資料截至日，不把它包裝成即時結論。',trigger:'確認各來源資料截至日是否仍適合你的判讀期間'}
   };
 }
+function snapshotTemperature(){
+  const group=(BRIEF.groups||[]).find(function(g){return g.name==='台股與溫度計';});
+  const item=group&&group.items&&group.items.find(function(i){return i.label==='市場溫度';});
+  const score=item&&numberOrNull(item.value);
+  return hasNum(score)?{score:score,zone:(item.sub||'').split('；')[0]}:null;
+}
 function buildMerged(L,meta,stock){
   const indexReady=meta.index.state!=='unavailable'&&hasNum(L.idx),marginReady=meta.margin.state!=='unavailable'&&hasNum(L.marPeak),fxReady=meta.fx.state!=='unavailable'&&hasNum(L.fx),cryptoReady=meta.crypto.state!=='unavailable'&&hasNum(L.btc)&&hasNum(L.eth);
   const indexMeta=displayMeta(meta.index,STATIC_META.taiwan),marginMeta=displayMeta(meta.margin,STATIC_META.margin),fxMeta=displayMeta(meta.fx,STATIC_META.fx);
@@ -487,8 +506,12 @@ function buildMerged(L,meta,stock){
   poolGroup.items.forEach(function(item){
     item.sub=joinSub(item.sub,stockPoolMetaText(stock),stockValuationUsable(stock)&&hasNum(stock.medCheap)&&hasNum(stock.medAK)?'可納入正式估值':'不納入溫度／預測判定：'+stockPoolIssueText(stock));
   });
-  const headline=hasNum(L.total)?'依台股與融資資料截至日、股票池（'+stockPoolMetaText(stock)+'），正式溫度為 '+L.total+'／100（'+L.zone+'）。此為各資料日的快照判讀，非盤中即時報價。':'本頁未計算正式總溫度：'+temperatureReason(meta,stock)+'。僅在必要數值缺失或來源無法辨識時停止計算；已有完整快照一律保留其資料截至日。';
-  return Object.assign({},BRIEF,{renderedAt:taipeiTimestamp(),headline:headline,alerts:safeAlerts(meta,stock),groups:[stockGroup,moneyGroup,globalGroup,riskGroup,preGroup,poolGroup],members:safeMembers(L,meta,stock),outlook:safeOutlook(meta,stock),predictions:safePredictions(stock)});
+  const fallbackScore=snapshotTemperature();
+  const summaryScore=hasNum(L.total)?L.total:(fallbackScore&&fallbackScore.score);
+  const summaryZone=hasNum(L.total)?L.zone:(fallbackScore&&fallbackScore.zone);
+  const summaryMeta=hasNum(L.total)?'資料截至：台股 '+(indexMeta.asOf||'—')+' · 融資 '+(marginMeta.asOf||'—')+' · 股票池 '+stockPoolMetaText(stock):fallbackScore?'資料截至 '+BRIEF.date+' · 最後完整晨報快照，尚未以本次讀取資料重算。':'';
+  const headline=hasNum(L.total)?'市場溫度 '+L.total+'／100（'+L.zone+'）。依各來源資料截至日判讀，非盤中即時報價。':fallbackScore?'尚未以本次讀取資料重算；以下保留最後完整快照的市場溫度（'+summaryZone+'）。':'本頁未計算正式總溫度：'+temperatureReason(meta,stock)+'。';
+  return Object.assign({},BRIEF,{renderedAt:taipeiTimestamp(),headline:headline,summaryScore:summaryScore,summaryZone:summaryZone,summaryMeta:summaryMeta,alerts:safeAlerts(meta,stock),groups:[stockGroup,moneyGroup,globalGroup,riskGroup,preGroup,poolGroup],members:safeMembers(L,meta,stock),outlook:safeOutlook(meta,stock),predictions:safePredictions(stock)});
 }
 function sourceStatus(label,live,fallback){return label+'：'+metaText(live,true)+(live.state==='unavailable'?'；畫面資料為 '+metaShort(fallback):'');}
 function statusText(meta,stock){
