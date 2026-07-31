@@ -136,7 +136,8 @@ function renderAll(D){
       <div class="accy">${m.acc&&m.acc.total>0?'準確率 ':''}${acc}</div>
       <div class="say">${m.today}</div></div></div>`;
   }).join('');
-  document.getElementById('outlook').innerHTML=['bull','base','bear'].map(k=>{
+  const _on=(D.outlook&&D.outlook._note)?`<div class="trig" style="grid-column:1/-1;margin:0 0 2px;color:var(--sub)">ⓘ ${D.outlook._note}</div>`:'';
+  document.getElementById('outlook').innerHTML=_on+['bull','base','bear'].map(k=>{
     const s=D.outlook[k]; if(!s)return '';
     return `<div class="sc"><h3>${ICONS[k][0]} ${ICONS[k][1]}${s.p?`<span style="color:var(--sub);font-weight:400;font-size:11.5px">機率感:${s.p}</span>`:''}</h3>
       <p>${s.txt}</p><div class="trig">觸發觀察:${s.trigger}</div></div>`;
@@ -458,12 +459,11 @@ function safeAlerts(meta,stock){
   return alerts;
 }
 function safeOutlook(meta,stock){
+  // 一週展望是「條件式情境+觸發條件」的框架(如站回60日線→偏多),非即時數字外插,因此一律顯示 BRIEF 發布的情境;
+  // 但誠實標明發布日與當前即時資料狀態,不假裝是即時外推(保留 Codex 的資料誠實原則)。
   const status='台股 '+metaShort(displayMeta(meta.index,STATIC_META.taiwan))+'；融資 '+metaShort(displayMeta(meta.margin,STATIC_META.margin))+'；股票池 '+stockPoolMetaText(stock)+'。';
-  return {
-    bull:{p:'暫停',txt:'本頁不將不同資料截至日的快照拼成一週偏多預測。',trigger:'待所有評分必要資料可安全計算後再發布'},
-    base:{p:'資料狀態',txt:status,trigger:'查看各來源的資料截至日與狀態'},
-    bear:{p:'風險管理',txt:'資料日期不同或來源讀取失敗時，沿用最後完整資料並標示資料截至日，不把它包裝成即時結論。',trigger:'確認各來源資料截至日是否仍適合你的判讀期間'}
-  };
+  const base=BRIEF.outlook||{};
+  return Object.assign({},base,{_note:'以下為 '+BRIEF.date+' 發布之情境與觸發條件(條件式框架,非即時外插);即時資料狀態:'+status});
 }
 function snapshotTemperature(){
   const group=(BRIEF.groups||[]).find(function(g){return g.name==='台股與溫度計';});
