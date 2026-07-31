@@ -64,7 +64,7 @@ footer{margin-top:36px;font-size:11.5px;color:var(--sub);line-height:1.7;border-
 <header>
   <h1>🌅 智囊團晨報</h1>
   <span class="date" id="bdate"></span>
-  <nav style="margin-left:auto"><a href="./">📊 存股評分表</a></nav>
+  <nav style="margin-left:auto;display:flex;gap:8px;align-items:center"><button onclick="refreshLive()" title="重抓台股/融資/匯率/加密的最新可得資料(全球指數與股票池為快照,不受此按鈕影響)" style="font-size:12.5px;border:1px solid var(--line);border-radius:16px;padding:4px 12px;background:var(--card);cursor:pointer">⟳ 更新即時資料</button><a href="./" style="font-size:12.5px;color:#1160c9;text-decoration:none;border:1px solid var(--line);border-radius:16px;padding:4px 12px;background:var(--card)">📊 存股評分表</a></nav>
 </header>
 
 <div class="headline" id="headline"><span class="tag">本頁摘要</span><span id="headtxt"></span></div>
@@ -416,19 +416,8 @@ function safePredictions(stock){
   });
 }
 function safeMembers(L,meta,stock){
-  const indexMeta=displayMeta(meta.index,STATIC_META.taiwan),marginMeta=displayMeta(meta.margin,STATIC_META.margin),fxMeta=displayMeta(meta.fx,STATIC_META.fx),cryptoMeta=displayMeta(meta.crypto,STATIC_META.pre);
-  const totalText=hasNum(L.total)?'正式溫度 '+L.total+'／100（'+L.zone+'）':'正式總溫度暫不計算';
-  return BRIEF.members.map(function(member){
-    let text='';
-    if(member.id==='marks')text='台股指數為'+metaShort(indexMeta)+'。'+totalText+(L.trendTxt?'；趨勢燈 '+L.trendTxt+'。':'。')+'資料不足時不以舊溫度替代。';
-    else if(member.id==='kost')text='融資為'+metaShort(marginMeta)+'；美元／台幣為'+metaShort(fxMeta)+'。'+(hasNum(L.marPeak)?'融資距峰值 '+pcs(L.marPeak)+'，僅供該資料日判讀。':'不對籌碼強弱作即時判斷。');
-    else if(member.id==='lynch')text='全球指數使用'+metaShort(STATIC_META.global)+'。這是每日快照，不把它寫成盤中或最新市場判斷。';
-    else if(member.id==='dalio')text='加密貨幣為'+metaShort(cryptoMeta)+'；VIX、美元與美債使用'+metaShort(STATIC_META.risk)+'。資料不是同一時間點，不下即時風險結論。';
-    else if(member.id==='graham')text='股票池估值資料：'+stockPoolMetaText(stock)+'。'+(stockValuationUsable(stock)&&hasNum(stock.medCheap)&&hasNum(stock.medAK)?'便宜度中位數 '+stock.medCheap.toFixed(2)+'，僅作該資料日的估值快照。':'估值不可用：'+stockPoolIssueText(stock)+'；已排除於溫度與預測判定。');
-    else if(member.id==='buffett')text='股票池股價為'+metaShort(stock.priceMeta)+'；財報／EPS為'+metaShort(stock.fundamentalsMeta)+'。'+(stockPriceUsable(stock)?'不把可用快照價格當成盤中報價。':'股價資料不可用，不以它建議進出。');
-    else text='規則先於敘事：'+totalText+'；台股為'+metaShort(indexMeta)+'；'+stockPoolMetaText(stock)+'。來源時間不同時，只提示資料限制，不延伸成即時結論。';
-    return Object.assign({},member,{today:text});
-  });
+  // 一律顯示排程當天發布的大師評論(本身已含資料日脈絡、有模糊參考價值);資料新鮮度見上方燈板與狀態列與各數字的資料日,不在每則評論改寫成「資料狀態說明」而讓內容消失。
+  return BRIEF.members;
 }
 function safeAlerts(meta,stock){
   const alerts=[];
