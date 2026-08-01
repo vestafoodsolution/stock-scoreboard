@@ -433,6 +433,7 @@ function safePredictions(stock){
   });
 }
 function safeMembers(L,meta,stock){
+  return BRIEF.members; // A(Claude):一律顯示排程當天發布的大師評論(過期也顯示,資料日已見燈板/狀態列/各數字);葛拉漢等在估值過期時不再被改寫成「暫不判定」而消失。下方原降級邏輯保留但停用。
   const indexMeta=displayMeta(meta.index,STATIC_META.taiwan),marginMeta=displayMeta(meta.margin,STATIC_META.margin),fxMeta=displayMeta(meta.fx,STATIC_META.fx),cryptoMeta=displayMeta(meta.crypto,STATIC_META.pre);
   const totalText=hasNum(L.total)?'正式溫度 '+L.total+'／100（'+L.zone+'）':'正式總溫度暫不計算';
   return BRIEF.members.map(function(member){
