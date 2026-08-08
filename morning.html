@@ -61,6 +61,12 @@ h2{font-size:14px;letter-spacing:1.5px;color:var(--sub);margin:30px 0 12px;text-
 .badge.miss{background:#fbe7e5;color:var(--bad)}
 .badge.unavailable{background:#fdf6e3;color:#8a6500}
 .hist{font-size:12.5px;color:var(--sub);line-height:1.9}
+.predreview{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.review-card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:13px 15px;font-size:12.5px;line-height:1.65}
+.review-card .review-title{font-weight:700;font-size:13px;margin-bottom:5px}
+.review-card .review-meta{color:var(--sub);font-size:11.5px}
+.review-card .review-next{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
+.review-policy{grid-column:1/-1;background:#f7f9fb;border:1px dashed var(--line);border-radius:10px;padding:9px 12px;color:var(--sub);font-size:11.5px}
 footer{margin-top:36px;font-size:11.5px;color:var(--sub);line-height:1.7;border-top:1px solid var(--line);padding-top:12px}
 @media(max-width:640px){.headline-main{align-items:flex-start;gap:12px}.headline-score{min-width:78px;font-size:46px}.headline-copy{font-size:15px}.members{grid-template-columns:1fr}}
 </style>
@@ -92,6 +98,9 @@ footer{margin-top:36px;font-size:11.5px;color:var(--sub);line-height:1.7;border-
 <thead><tr><th>成員</th><th>預測(可驗證)</th><th>到期</th><th>結果</th></tr></thead><tbody></tbody>
 </table></div>
 
+<h2>預測事後檢討與校準</h2>
+<div class="predreview" id="predreview"></div>
+
 <h2>近期晨報</h2>
 <div class="hist" id="hist"></div>
 
@@ -113,14 +122,15 @@ function headlineTone(score){return score>=75?'hot':score<25?'cold':score==null?
 // Historical verification completed 2026-08-08 for the overdue predictions
 // in BRIEF. Keep the evidence in the published snapshot so pending cannot
 // remain open indefinitely while avoiding a browser-side guess.
+const PREDICTION_CALIBRATION_POLICY='校準原則：單次未中只記錄原因，不事後改寫門檻；同類預測累積至少 10 筆後，才調整權重或規則。';
 const PREDICTION_VERIFICATIONS={
   p2:{status:'hit',result:'結算：07-28 融資餘額 9,096,008 張，低於 9,200,000，命中。'},
   p4:{status:'hit',result:'結算：07-20 至 07-31 VIX 最高 20.66，未觸及 30，命中。'},
   p5:{status:'hit',result:'結算：到期前最新可用股票池便宜度中位數 0.476，低於 0.6，命中。'},
-  p6:{status:'miss',result:'結算：07-20 至 07-31 威剛日內最低 334，未出現 ≤324，未中。'},
+  p6:{status:'miss',result:'結算：07-20 至 07-31 威剛日內最低 334，未出現 ≤324，未中。',review:{type:'價格門檻過窄',finding:'目標價 324 與實際低點 334 相差約 3%，預測沒有觸發，但也沒有驗證出「安全邊際已失效」。',next:'下次同時列出估值價格帶與波動緩衝；單一極限價保留為強訊號，不作唯一觀察門檻。'}},
   p7:{status:'hit',result:'結算：07-20 至 07-31 減碼三檔平均報酬 −1.62%，0056 為 −0.94%，較差，命中。'},
   p8:{status:'hit',result:'結算：07-28 至 08-04 每個交易日台股報酬指數收盤均低於當日 60 日均線，命中。'},
-  p9:{status:'miss',result:'結算：07-20 至 08-04 費半日內最低 10,445.44，跌破 11,000，未中。'},
+  p9:{status:'miss',result:'結算：07-20 至 08-04 費半日內最低 10,445.44，跌破 11,000，未中。',review:{type:'市場狀態轉折',finding:'費半不只跌破 11,000，還下探至 10,445.44，代表半導體賣壓比基準情境更嚴重。',next:'下次加入「跌破支撐即切換偏空」的風險分支，並用趨勢確認與波動緩衝，不只押注一個不破位。'}},
   p10:{status:'hit',result:'結算：到期前最新可用股票池便宜度中位數 0.476，低於 0.55，命中。'}
 };
 function predictionDisplayStatus(pred){
@@ -167,6 +177,11 @@ function renderAll(D){
   document.querySelector('#predtbl tbody').innerHTML=D.predictions.map(p=>{const status=predictionDisplayStatus(p);return `<tr>
     <td>${nameOf(p.member)}</td><td>${p.claim}</td><td>${p.due}</td>
     <td><span class="badge ${status}">${status==='pending'?'觀察中':status==='overdue'?'待結算':status==='hit'?'✓ 命中':status==='unavailable'?'暫不判定':'✗ 未中'}</span></td></tr>`;}).join('');
+  const reviews=(D.predictions||[]).filter(p=>p.review);
+  document.getElementById('predreview').innerHTML=`<div class="review-policy">${PREDICTION_CALIBRATION_POLICY}</div>`+reviews.map(p=>{
+    const sample=memberRows.find(m=>m.id===p.member)?.acc?.total||0;
+    return `<div class="review-card"><div class="review-title">${nameOf(p.member)} · ${p.id} · ${p.review.type}</div><div>${p.review.finding}</div><div class="review-meta">目前已結算樣本：${sample} 筆；未達 10 筆校準門檻，先記錄、不調整權重。</div><div class="review-next"><b>下次校準：</b>${p.review.next}</div></div>`;
+  }).join('');
   document.getElementById('hist').innerHTML=(D.history||[]).map(h=>`<div>▸ ${h.date} — ${h.headline}</div>`).join('');
 }
 
