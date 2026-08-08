@@ -106,24 +106,50 @@ export function officialPriceUrls(date) {
   ];
 }
 
-export async function officialPrices(date) {
+async function officialPricesDetailed(date, { fetchImpl = fetch, tolerateErrors = false } = {}) {
   const urls = officialPriceUrls(date);
   const replies = await Promise.all(urls.map(async url => {
-    const response = await fetch(url, { headers: { 'user-agent': 'stock-scoreboard-snapshot/1.0' } });
-    if (!response.ok) throw new Error(`official source HTTP ${response.status}`);
-    return rowMap(await response.json());
+    try {
+      const response = await fetchImpl(url, { headers: { 'user-agent': 'stock-scoreboard-snapshot/1.0' } });
+      if (!response.ok) throw new Error(`official source HTTP ${response.status}`);
+      return { prices: rowMap(await response.json()), error: null };
+    } catch (error) {
+      if (!tolerateErrors) throw error;
+      return { prices: new Map(), error };
+    }
   }));
-  return new Map(replies.flatMap(map => [...map]));
+  return {
+    prices: new Map(replies.flatMap(reply => [...reply.prices])),
+    errors: replies.filter(reply => reply.error).map(reply => reply.error.message)
+  };
+}
+
+export async function officialPrices(date, options = {}) {
+  return (await officialPricesDetailed(date, options)).prices;
 }
 
 const FINMIND_MAX_ATTEMPTS = 3;
 const FINMIND_RETRY_DELAYS_MS = [1000, 2000];
+const FINMIND_PRICE_LOOKBACK_DAYS = 30;
 
 function finMindUrl(code, start, token = process.env.FINMIND_TOKEN?.trim()) {
   const params = new URLSearchParams({
     dataset: 'TaiwanStockFinancialStatements',
     data_id: String(code),
     start_date: start
+  });
+  // The optional token is deliberately read only from the environment.  Never
+  // log this URL: its query string may contain the credential.
+  if (token) params.set('token', token);
+  return `https://api.finmindtrade.com/api/v4/data?${params}`;
+}
+
+function finMindPriceUrl(code, start, end = start, token = process.env.FINMIND_TOKEN?.trim()) {
+  const params = new URLSearchParams({
+    dataset: 'TaiwanStockPrice',
+    data_id: String(code),
+    start_date: start,
+    end_date: end
   });
   // The optional token is deliberately read only from the environment.  Never
   // log this URL: its query string may contain the credential.
@@ -167,7 +193,85 @@ export async function finMindFundamentals(code, options = {}) {
   return body.data;
 }
 
-export function buildCandidate(stocks, prices, asOf) {
+async function finMindPriceRecord(code, date, options = {}) {
+  const start = options.start || date;
+  const end = options.end || date;
+  const url = finMindPriceUrl(code, start, end);
+  const response = await fetchFinMindWithRetry(url, code, options);
+  const body = await response.json();
+  if (body.status !== 200 || !Array.isArray(body.data)) throw new Error(`FinMind price data unavailable for ${code}`);
+  const rows = body.data
+    .filter(item => /^\d{4}-\d{2}-\d{2}$/.test(String(item.date)) && String(item.date) <= date && num(item.close) != null && num(item.close) > 0)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const row = options.allowPrior ? rows[0] : rows.find(item => String(item.date) === date);
+  const close = num(row?.close);
+  if (close == null || close <= 0) throw new Error(`FinMind price missing for ${code} on ${date}`);
+  return { close, asOf: String(row.date) };
+}
+
+export async function finMindPrice(code, date, options = {}) {
+  // By default request one exact trading date.  A neighboring date is never
+  // accepted as a substitute unless the caller explicitly opts into a
+  // bounded lookback for an official no-trade/missing row.
+  return (await finMindPriceRecord(code, date, options)).close;
+}
+
+function offsetDate(date, days) {
+  const value = new Date(`${date}T00:00:00Z`);
+  if (!Number.isFinite(value.getTime())) throw new Error(`cannot offset invalid date: ${date}`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+export async function pricesWithFallback(stocks, date, options = {}) {
+  const { fetchImpl = fetch, sleep, ...requestOptions } = options;
+  const official = await officialPricesDetailed(date, { fetchImpl, tolerateErrors: true });
+  const codes = [...new Set(stocks.map(stock => String(stock.code || '').padStart(4, '0')))].filter(code => /^\d{4,6}$/.test(code));
+  const missing = codes.filter(code => !official.prices.has(code));
+  const queue = [...missing];
+  const fallback = new Map();
+  const fallbackDates = new Map();
+  const failures = [];
+  const workerCount = Math.min(3, queue.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (queue.length) {
+      const code = queue.shift();
+      try {
+        let record;
+        try {
+          record = await finMindPriceRecord(code, date, { fetchImpl, sleep, ...requestOptions });
+        } catch (error) {
+          if (!error.message.startsWith('FinMind price missing')) throw error;
+          // Some securities have no trade on the requested day and therefore
+          // legitimately have no official close.  Carry forward only the
+          // latest real FinMind close within a bounded window, preserving its
+          // own source date in Jdate instead of presenting it as today's trade.
+          record = await finMindPriceRecord(code, date, {
+            fetchImpl,
+            sleep,
+            ...requestOptions,
+            start: offsetDate(date, -FINMIND_PRICE_LOOKBACK_DAYS),
+            end: date,
+            allowPrior: true
+          });
+        }
+        fallback.set(code, record.close);
+        fallbackDates.set(code, record.asOf);
+      } catch (error) {
+        failures.push(`${code}: ${error.message}`);
+      }
+    }
+  }));
+  if (failures.length) throw new Error(`price coverage failed: FinMind補檔失敗：${failures.join('; ')}`);
+  return {
+    prices: new Map([...official.prices, ...fallback]),
+    officialErrors: official.errors,
+    fallbackCodes: missing,
+    fallbackDates
+  };
+}
+
+export function buildCandidate(stocks, prices, asOf, priceDates = new Map()) {
   const missing = [];
   const updated = stocks.map(stock => {
     const code = String(stock.code || '').padStart(4, '0');
@@ -180,7 +284,7 @@ export function buildCandidate(stocks, prices, asOf) {
     // On a price-only day the numerator changes solely with price, so this is
     // exactly oldCheap × oldClose / newClose while dividends remain unchanged.
     const cheap = +(num(stock.cheap) * num(stock.J) / close).toFixed(3);
-    return { ...stock, J: close, Jdate: asOf, cheap };
+    return { ...stock, J: close, Jdate: priceDates.get(code) || asOf, cheap };
   });
   if (missing.length) throw new Error(`coverage/validation failed (${missing.length}/${stocks.length}): ${missing.join(', ')}`);
   const medCheap = median(updated.map(s => num(s.cheap)));
@@ -354,9 +458,23 @@ async function main() {
   let fundamentals = existingSnapshot?.fundamentals || fundamentalsFrom(brief.value);
   if ((target === 'fundamentals') && !priceMeta) throw new Error('fundamentals-only update requires an existing canonical price snapshot; run --target=price or --target=both first');
   if (target === 'price' || target === 'both') {
-    const candidate = buildCandidate(stocks, await officialPrices(requestedDate), requestedDate);
+    const priceResult = await pricesWithFallback(stocks, requestedDate);
+    const candidate = buildCandidate(stocks, priceResult.prices, requestedDate, priceResult.fallbackDates);
     stocks = candidate.updated;
-    priceMeta = { source: 'TWSE／TPEx 官方日收盤資料', asOf: requestedDate, fetchedAt: new Date().toISOString(), coverage: `${stocks.length}/${stocks.length}`, medCheap: candidate.medCheap, method: '舊便宜度 × 舊收盤價 ÷ 新收盤價（股利／EPS未更新）' };
+    const fallbackUsed = priceResult.fallbackCodes.length > 0;
+    priceMeta = {
+      source: fallbackUsed ? 'TWSE／TPEx 官方日收盤資料；缺檔由 FinMind TaiwanStockPrice 補齊' : 'TWSE／TPEx 官方日收盤資料',
+      asOf: requestedDate,
+      fetchedAt: new Date().toISOString(),
+      coverage: `${stocks.length}/${stocks.length}`,
+      officialCoverage: `${stocks.length - priceResult.fallbackCodes.length}/${stocks.length}`,
+      fallbackCoverage: `${priceResult.fallbackCodes.length}/${stocks.length}`,
+      fallbackCodes: priceResult.fallbackCodes,
+      fallbackAsOf: Object.fromEntries(priceResult.fallbackDates),
+      officialErrors: priceResult.officialErrors,
+      medCheap: candidate.medCheap,
+      method: '舊便宜度 × 舊收盤價 ÷ 新收盤價（股利／EPS未更新）'
+    };
   }
   if (target === 'fundamentals' || target === 'both') {
     const rowsByCode = new Map();

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { atomicWriteJson, buildCandidate, buildFundamentalsCandidate, finMindFundamentals, officialPriceUrls, rowMap } from '../scripts/update-stock-pool.mjs';
+import { atomicWriteJson, buildCandidate, buildFundamentalsCandidate, finMindFundamentals, finMindPrice, officialPriceUrls, pricesWithFallback, rowMap } from '../scripts/update-stock-pool.mjs';
 
 const fixture = JSON.parse(await fs.readFile(new URL('./fixtures/twse-closing-sample.json', import.meta.url), 'utf8'));
 const fundamentalFixture = JSON.parse(await fs.readFile(new URL('./fixtures/fundamentals-common-period.json', import.meta.url), 'utf8'));
@@ -25,6 +25,82 @@ assert.equal(next.updated[0].cheap, 0.476);
 assert.equal(next.updated[1].cheap, 0.703);
 assert.equal(next.medCheap, 0.703);
 assert.throws(() => buildCandidate(stocks, new Map([['2330', 2300]]), '2026-07-29'));
+
+const fallbackRequests = [];
+const fallbackPriceResult = await pricesWithFallback(
+  [{ name: '上市', code: '2330' }, { name: '官方缺檔', code: '5904' }],
+  '2026-08-07',
+  {
+    fetchImpl: async url => {
+      const parsed = new URL(url);
+      fallbackRequests.push(parsed);
+      if (parsed.hostname === 'www.twse.com.tw') {
+        return new Response(JSON.stringify({ tables: [{ fields: ['代號', '收盤價'], data: [['2330', '2370']] }] }), { status: 200 });
+      }
+      if (parsed.hostname === 'www.tpex.org.tw') {
+        return new Response(JSON.stringify({ tables: [] }), { status: 200 });
+      }
+      assert.equal(parsed.searchParams.get('dataset'), 'TaiwanStockPrice');
+      assert.equal(parsed.searchParams.get('data_id'), '5904');
+      assert.equal(parsed.searchParams.get('start_date'), '2026-08-07');
+      assert.equal(parsed.searchParams.get('end_date'), '2026-08-07');
+      return new Response(JSON.stringify({ status: 200, data: [{ date: '2026-08-07', close: 64.2 }] }), { status: 200 });
+    },
+    sleep: async () => {}
+  }
+);
+assert.equal(fallbackPriceResult.prices.get('2330'), 2370);
+assert.equal(fallbackPriceResult.prices.get('5904'), 64.2);
+assert.deepEqual(fallbackPriceResult.fallbackCodes, ['5904']);
+assert.equal(fallbackRequests.filter(url => url.searchParams.get('dataset') === 'TaiwanStockPrice').length, 1);
+let carryForwardCalls = 0;
+const carryForwardResult = await pricesWithFallback(
+  [{ name: '上市', code: '2330' }, { name: '無當日成交', code: '5904' }],
+  '2026-08-07',
+  {
+    fetchImpl: async url => {
+      const parsed = new URL(url);
+      if (parsed.hostname === 'www.twse.com.tw') {
+        return new Response(JSON.stringify({ tables: [{ fields: ['代號', '收盤價'], data: [['2330', '2370']] }] }), { status: 200 });
+      }
+      if (parsed.hostname === 'www.tpex.org.tw') {
+        return new Response(JSON.stringify({ tables: [] }), { status: 200 });
+      }
+      carryForwardCalls += 1;
+      const data = carryForwardCalls === 1 ? [] : [{ date: '2026-07-29', close: 720 }];
+      return new Response(JSON.stringify({ status: 200, data }), { status: 200 });
+    },
+    sleep: async () => {}
+  }
+);
+assert.equal(carryForwardCalls, 2, 'missing same-day price must use one bounded FinMind lookback');
+assert.equal(carryForwardResult.prices.get('5904'), 720);
+assert.equal(carryForwardResult.fallbackDates.get('5904'), '2026-07-29');
+const carriedCandidate = buildCandidate(
+  [{ name: '上市', code: '2330', J: 2300, cheap: 0.476 }, { name: '無當日成交', code: '5904', J: 60, cheap: 0.5 }],
+  carryForwardResult.prices,
+  '2026-08-07',
+  carryForwardResult.fallbackDates
+);
+assert.equal(carriedCandidate.updated[1].Jdate, '2026-07-29', 'carried-forward price keeps its real FinMind source date');
+const incompleteFallbackPrices = new Map(fallbackPriceResult.prices);
+incompleteFallbackPrices.delete('5904');
+assert.throws(
+  () => buildCandidate(
+    [{ name: '上市', code: '2330', J: 2300, cheap: 0.476 }, { name: '官方缺檔', code: '5904', J: 60, cheap: 0.5 }],
+    incompleteFallbackPrices,
+    '2026-08-07'
+  ),
+  /coverage\/validation failed.*官方缺檔/,
+  'price write gate still rejects any stock not covered after fallback'
+);
+await assert.rejects(
+  () => finMindPrice('5904', '2026-08-07', {
+    fetchImpl: async () => new Response(JSON.stringify({ status: 200, data: [{ date: '2026-08-06', close: 63 }] }), { status: 200 })
+  }),
+  /price missing for 5904 on 2026-08-07/,
+  'FinMind neighboring dates must not satisfy the requested trading date'
+);
 
 const epsRows = dates => dates.flatMap((date, i) => [
   { date, type: 'EPS', value: i < 4 ? 1 : 2 },
@@ -145,4 +221,4 @@ assert.match(morningHtml, /meta\.state='snapshot';/);
 assert.match(morningHtml, /資料截至 /);
 assert.match(morningHtml, /if\(metaUsable\(meta\.index\)&&metaUsable\(meta\.margin\)/);
 assert.doesNotMatch(morningHtml, /股價已過期|財報已過有效期限/);
-console.log('FIXTURE TEST OK: official TWSE/TPEx parsing, ROC TPEx URL, price/fundamental formulas, common-quarter alignment/rejection, last-complete snapshot carry-forward, safe FinMind token/retry, AA=0 preservation, atomic snapshot replacement, and dated snapshot UI policy');
+console.log('FIXTURE TEST OK: official TWSE/TPEx parsing, ROC TPEx URL, FinMind TaiwanStockPrice same-day/lookback fallback with 59/59 gate, price/fundamental formulas, common-quarter alignment/rejection, last-complete snapshot carry-forward, safe FinMind token/retry, AA=0 preservation, atomic snapshot replacement, and dated snapshot UI policy');
