@@ -225,6 +225,7 @@ assert.match(morningHtml, /const PREDICTION_VERIFICATIONS=/);
 assert.match(morningHtml, /p2:\{status:'hit'/);
 assert.match(morningHtml, /p6:\{status:'miss'/);
 assert.match(morningHtml, /const memberRows=/);
+assert.match(morningHtml, /if\(p\.status==='pending'&&valuationUnavailable/);
 assert.match(morningHtml, /if\(metaUsable\(meta\.index\)&&metaUsable\(meta\.margin\)/);
 assert.doesNotMatch(morningHtml, /股價已過期|財報已過有效期限/);
 console.log('FIXTURE TEST OK: official TWSE/TPEx parsing, ROC TPEx URL, FinMind TaiwanStockPrice same-day/lookback fallback with 59/59 gate, price/fundamental formulas, common-quarter alignment/rejection, last-complete snapshot carry-forward, safe FinMind token/retry, AA=0 preservation, atomic snapshot replacement, and dated snapshot UI policy');

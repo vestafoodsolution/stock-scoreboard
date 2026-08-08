@@ -447,7 +447,7 @@ function safePredictions(stock){
     const verified=PREDICTION_VERIFICATIONS[p.id];
     if(verified)return Object.assign({},p,verified);
     const valuationUnavailable=!stockValuationUsable(stock)||!hasNum(stock.medCheap)||!hasNum(stock.medAK);
-    if(valuationUnavailable&&/便宜度|股票池/.test(p.claim+' '+p.verify)){
+    if(p.status==='pending'&&valuationUnavailable&&/便宜度|股票池/.test(p.claim+' '+p.verify)){
       const reason='股票池估值不可用：'+stockPoolIssueText(stock);
       return Object.assign({},p,{claim:p.claim+'（'+reason+'，暫不判定）',status:'unavailable'});
     }
