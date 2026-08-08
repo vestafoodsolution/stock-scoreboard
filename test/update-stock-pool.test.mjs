@@ -223,6 +223,7 @@ assert.match(morningHtml, /predictionDisplayStatus\(pred\)/);
 assert.match(morningHtml, /status==='overdue'\?'待結算'/);
 assert.match(morningHtml, /const PREDICTION_VERIFICATIONS=/);
 assert.match(morningHtml, /p2:\{status:'hit'/);
+assert.match(morningHtml, /p5:\{status:'hit'/);
 assert.match(morningHtml, /p6:\{status:'miss'/);
 assert.match(morningHtml, /const memberRows=/);
 assert.match(morningHtml, /if\(p\.status==='pending'&&valuationUnavailable/);
