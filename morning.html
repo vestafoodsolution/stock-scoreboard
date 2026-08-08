@@ -110,6 +110,18 @@ const cls=v=>v==null?'fl':(v>0.0001?'up':v<-0.0001?'dn':'fl');
 // ===== 統一渲染(可傳入 BRIEF 或即時 merged)=====
 const ICONS={bull:['🟢','偏多情境'],base:['⚪','基準情境'],bear:['🔴','偏空情境']};
 function headlineTone(score){return score>=75?'hot':score<25?'cold':score==null?'neutral':'warm';}
+// Historical verification completed 2026-08-08 for the overdue predictions
+// in BRIEF. Keep the evidence in the published snapshot so pending cannot
+// remain open indefinitely while avoiding a browser-side guess.
+const PREDICTION_VERIFICATIONS={
+  p2:{status:'hit',result:'結算：07-28 融資餘額 9,096,008 張，低於 9,200,000，命中。'},
+  p4:{status:'hit',result:'結算：07-20 至 07-31 VIX 最高 20.66，未觸及 30，命中。'},
+  p6:{status:'miss',result:'結算：07-20 至 07-31 威剛日內最低 334，未出現 ≤324，未中。'},
+  p7:{status:'hit',result:'結算：07-20 至 07-31 減碼三檔平均報酬 −1.62%，0056 為 −0.94%，較差，命中。'},
+  p8:{status:'hit',result:'結算：07-28 至 08-04 每個交易日台股報酬指數收盤均低於當日 60 日均線，命中。'},
+  p9:{status:'miss',result:'結算：07-20 至 08-04 費半日內最低 10,445.44，跌破 11,000，未中。'},
+  p10:{status:'hit',result:'結算：到期前最新可用股票池便宜度中位數 0.476，低於 0.55，命中。'}
+};
 function predictionDisplayStatus(pred){
   return pred.status==='pending'&&validDate(pred.due)&&pred.due<taipeiDate()?'overdue':pred.status;
 }
@@ -130,7 +142,11 @@ function renderAll(D){
       <div class="k"><span class="dot ${t.light}"></span>${t.label}</div>
       <div class="v">${t.display??fmt(t.value)}</div>
       <div class="d ${cls(t.chg)}">${t.sub??pc(t.chg)}</div></div>`).join('')+'</div>').join('');
-  document.getElementById('members').innerHTML=D.members.map(m=>{
+  const memberRows=(D.members||[]).map(m=>{
+    const judged=(D.predictions||[]).filter(p=>p.member===m.id&&(p.status==='hit'||p.status==='miss'));
+    return judged.length?Object.assign({},m,{acc:{hit:judged.filter(p=>p.status==='hit').length,total:judged.length}}):m;
+  });
+  document.getElementById('members').innerHTML=memberRows.map(m=>{
     const acc=m.acc&&m.acc.total>0?`<b>${Math.round(m.acc.hit/m.acc.total*100)}%</b> <span style="color:var(--sub)">(${m.acc.hit}/${m.acc.total})</span>`
       :`<span style="color:var(--sub)">準確率:樣本累積中</span>`;
     return `<div class="mem">
@@ -146,7 +162,7 @@ function renderAll(D){
     return `<div class="sc"><h3>${ICONS[k][0]} ${ICONS[k][1]}${s.p?`<span style="color:var(--sub);font-weight:400;font-size:11.5px">機率感:${s.p}</span>`:''}</h3>
       <p>${s.txt}</p><div class="trig">觸發觀察:${s.trigger}</div></div>`;
   }).join('');
-  const nameOf=id=>{const m=D.members.find(x=>x.id===id);return m?m.name:id;};
+  const nameOf=id=>{const m=memberRows.find(x=>x.id===id);return m?m.name:id;};
   document.querySelector('#predtbl tbody').innerHTML=D.predictions.map(p=>{const status=predictionDisplayStatus(p);return `<tr>
     <td>${nameOf(p.member)}</td><td>${p.claim}</td><td>${p.due}</td>
     <td><span class="badge ${status}">${status==='pending'?'觀察中':status==='overdue'?'待結算':status==='hit'?'✓ 命中':status==='unavailable'?'暫不判定':'✗ 未中'}</span></td></tr>`;}).join('');
@@ -428,6 +444,8 @@ function temperatureReason(meta,stock){
 }
 function safePredictions(stock){
   return BRIEF.predictions.map(function(p){
+    const verified=PREDICTION_VERIFICATIONS[p.id];
+    if(verified)return Object.assign({},p,verified);
     const valuationUnavailable=!stockValuationUsable(stock)||!hasNum(stock.medCheap)||!hasNum(stock.medAK);
     if(valuationUnavailable&&/便宜度|股票池/.test(p.claim+' '+p.verify)){
       const reason='股票池估值不可用：'+stockPoolIssueText(stock);
