@@ -60,23 +60,22 @@ function replaceRange(text, range, serialized) {
 
 export function rowMap(payload) {
   const result = new Map();
+  const seen = new WeakSet();
   const visit = node => {
-    if (!node || typeof node !== 'object') return;
+    if (!node || typeof node !== 'object' || seen.has(node)) return;
+    seen.add(node);
     if (Array.isArray(node)) { node.forEach(visit); return; }
-    const tables = Array.isArray(node.tables) ? node.tables : [node];
-    for (const table of tables) {
-      const fields = table.fields || table.title || [];
-      const rows = table.data || table.rows || [];
-      if (Array.isArray(fields) && Array.isArray(rows)) {
-        const codeIndex = fields.findIndex(x => /代號|證券代碼|股票代碼/.test(String(x)));
-        // TWSE labels this 收盤價; TPEx currently labels it 收盤 in its OTC table.
-        const closeIndex = fields.findIndex(x => /收盤價|收盤|Close/.test(String(x)));
-        if (codeIndex >= 0 && closeIndex >= 0) {
-          for (const row of rows) {
-            const code = String(row[codeIndex] ?? '').trim();
-            const close = num(row[closeIndex]);
-            if (/^\d{4,6}$/.test(code) && close != null && close > 0) result.set(code.padStart(4, '0'), close);
-          }
+    const fields = node.fields || node.title || [];
+    const rows = node.data || node.rows || [];
+    if (Array.isArray(fields) && Array.isArray(rows)) {
+      const codeIndex = fields.findIndex(x => /代號|證券代碼|股票代碼/.test(String(x)));
+      // TWSE labels this 收盤價; TPEx currently labels it 收盤 in its OTC table.
+      const closeIndex = fields.findIndex(x => /收盤價|收盤|Close/.test(String(x)));
+      if (codeIndex >= 0 && closeIndex >= 0) {
+        for (const row of rows) {
+          const code = String(row[codeIndex] ?? '').trim();
+          const close = num(row[closeIndex]);
+          if (/^\d{4,6}$/.test(code) && close != null && close > 0) result.set(code.padStart(4, '0'), close);
         }
       }
     }
@@ -305,9 +304,21 @@ function validUntilFor(periodEnd) {
   return null;
 }
 
-function statementValues(rows, type) {
-  return rows.filter(row => row.type === type && /^\d{4}-\d{2}-\d{2}$/.test(row.date) && num(row.value) != null)
+function statementIndex(rows) {
+  const byType = new Map();
+  const validRows = rows.filter(row => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && num(row.value) != null)
     .sort((a, b) => a.date.localeCompare(b.date));
+  for (const row of validRows) {
+    let entry = byType.get(row.type);
+    if (!entry) {
+      entry = { values: new Map(), conflicts: new Set() };
+      byType.set(row.type, entry);
+    }
+    const value = num(row.value);
+    if (entry.values.has(row.date) && entry.values.get(row.date) !== value) entry.conflicts.add(row.date);
+    entry.values.set(row.date, value);
+  }
+  return byType;
 }
 
 function quarterEndsEndingAt(periodEnd, count = 8) {
@@ -331,15 +342,8 @@ function quarterLabel(periodEnd) {
   return `${match[1]}Q${quarter}`;
 }
 
-function valuesByPeriod(rows, type) {
-  const values = new Map();
-  const conflicts = new Set();
-  for (const row of statementValues(rows, type)) {
-    const value = num(row.value);
-    if (values.has(row.date) && values.get(row.date) !== value) conflicts.add(row.date);
-    values.set(row.date, value);
-  }
-  return { values, conflicts };
+function valuesByPeriod(index, type) {
+  return index.get(type) || { values: new Map(), conflicts: new Set() };
 }
 
 function completePeriods(values, conflicts, count = 8) {
@@ -351,10 +355,10 @@ function completePeriods(values, conflicts, count = 8) {
   return available;
 }
 
-function commonLatestPeriod(required, rowsByCode) {
+function commonLatestPeriod(required, statementsByCode) {
   const availability = required.map(stock => {
     const code = String(stock.code || '').padStart(4, '0');
-    const { values, conflicts } = valuesByPeriod(rowsByCode.get(code) || [], 'EPS');
+    const { values, conflicts } = valuesByPeriod(statementsByCode.get(code), 'EPS');
     return { stock, periods: completePeriods(values, conflicts) };
   });
   const withoutEightQuarters = availability.filter(item => item.periods.size === 0).map(item => `${item.stock.name || item.stock.code}(${item.stock.code || '無代號'})`);
@@ -368,7 +372,11 @@ function commonLatestPeriod(required, rowsByCode) {
 // latest 4 EPS versus prior 4 EPS; AK is null where prior-period EPS <= 0.
 export function buildFundamentalsCandidate(stocks, rowsByCode, asOf) {
   const required = stocks.filter(stock => stock.type !== 'etf');
-  const periodEnd = commonLatestPeriod(required, rowsByCode);
+  const statementsByCode = new Map(required.map(stock => {
+    const code = String(stock.code || '').padStart(4, '0');
+    return [code, statementIndex(rowsByCode.get(code) || [])];
+  }));
+  const periodEnd = commonLatestPeriod(required, statementsByCode);
   const periods = quarterEndsEndingAt(periodEnd);
   const latest4Periods = periods.slice(-4);
   const prior4Periods = periods.slice(0, 4);
@@ -376,8 +384,8 @@ export function buildFundamentalsCandidate(stocks, rowsByCode, asOf) {
   const updated = stocks.map(stock => {
     if (stock.type === 'etf') return stock; // Existing system has no EPS/AK for ETF.
     const code = String(stock.code || '').padStart(4, '0');
-    const rows = rowsByCode.get(code);
-    const eps = valuesByPeriod(rows || [], 'EPS');
+    const statements = statementsByCode.get(code);
+    const eps = valuesByPeriod(statements, 'EPS');
     if (periods.some(period => !eps.values.has(period) || eps.conflicts.has(period))) { missing.push(`${stock.name || code}(${code || '無代號'}): 共同期EPS不完整`); return stock; }
     const prior = prior4Periods.reduce((sum, period) => sum + eps.values.get(period), 0);
     const current = latest4Periods.reduce((sum, period) => sum + eps.values.get(period), 0);
@@ -394,8 +402,8 @@ export function buildFundamentalsCandidate(stocks, rowsByCode, asOf) {
       q4: +eps.values.get(latest4Periods[3]).toFixed(2), q4Period: quarterLabel(latest4Periods[3]),
       AK: ak
     };
-    const income = valuesByPeriod(rows || [], 'IncomeAfterTaxes');
-    const revenue = valuesByPeriod(rows || [], 'Revenue');
+    const income = valuesByPeriod(statements, 'IncomeAfterTaxes');
+    const revenue = valuesByPeriod(statements, 'Revenue');
     // AA must use the same common four quarters as EPS.  If a financial
     // statement does not expose revenue, leave its existing AA untouched;
     // do not pull a newer, incompatible four-quarter window.
@@ -420,7 +428,7 @@ export async function atomicWriteJson(file, value, options = {}) {
   const temp = `${file}.snapshot-${process.pid}-${Date.now()}.tmp`;
   try {
     await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    await fs.writeFile(temp, `${JSON.stringify(value)}\n`, 'utf8');
     if (options.failBeforeRename) throw new Error('simulated atomic snapshot failure');
     await fs.rename(temp, file); // Same-directory rename: readers see old or complete new JSON, never a partial file.
   } catch (error) {

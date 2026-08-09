@@ -191,7 +191,6 @@ function renderAll(D){
 const TP_TZ='Asia/Taipei';
 const POOL_SIZE=59; // ⚠ 股票池檔數:變更時 index.html 的 DEFAULT_DATA、此常數、scripts/update-stock-pool.mjs 三處須一致
 const STATE_TEXT={latest:'最新可用日資料',snapshot:'資料快照',stale:'資料快照',unavailable:'暫無資料'};
-const STOCK_PRICE_MAX_TRADING_DAYS=3;
 function taipeiParts(value){
   const p={};
   new Intl.DateTimeFormat('en-CA',{timeZone:TP_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(value==null?Date.now():value)).forEach(function(x){p[x.type]=x.value;});
@@ -199,7 +198,6 @@ function taipeiParts(value){
 }
 function taipeiDate(value){const p=taipeiParts(value);return p.year+'-'+p.month+'-'+p.day;}
 function taipeiTimestamp(value){const p=taipeiParts(value);return p.year+'-'+p.month+'-'+p.day+' '+p.hour+':'+p.minute;}
-function isToday(date){return date===taipeiDate();}
 function validDate(value){return typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value);}
 function numberOrNull(value){if(value==null||value==='')return null;const n=Number(value);return isFinite(n)?n:null;}
 function hasNum(value){return typeof value==='number'&&isFinite(value);}
@@ -275,18 +273,17 @@ function stateText(meta){
   if(meta&&meta.kind==='quarterly')return {snapshot:'財報／EPS資料快照',stale:'財報／EPS資料快照',unavailable:'財報狀態無法確認'}[meta.state]||'財報狀態無法確認';
   return STATE_TEXT[meta&&meta.state]||'暫無資料';
 }
-function metaText(meta,showFetched){
+function metaText(meta){
   const out=[stateText(meta),meta.source];
   if(meta.asOf)out.push('資料截至 '+meta.asOf);
   if(meta&&meta.kind==='stock-price'&&meta.calendarState==='confirmed')out.push('最後完成交易日 '+meta.lastCompletedTradingDate);
   if(meta&&meta.kind==='stock-price'&&meta.calendarState!=='confirmed')out.push('交易日曆暫無法確認'+(meta.calendarErrorType&&meta.calendarErrorType!=='pending'?'（'+errorText(meta.calendarErrorType)+'）':''));
   if(meta&&meta.kind==='quarterly'&&meta.periodEnd)out.push('財報期間 '+meta.periodEnd);
   if(meta&&meta.kind==='quarterly'&&meta.validUntil)out.push('下次法定申報期限 '+meta.validUntil);
-  if(showFetched&&meta.fetchedAt)out.push('讀取 '+meta.fetchedAt+'（台北）');
   if(meta.state==='unavailable'&&meta.errorType)out.push(errorText(meta.errorType));
   return out.join(' · ');
 }
-function metaShort(meta){return metaText(meta,false);}
+function metaShort(meta){return metaText(meta);}
 function joinSub(){return Array.prototype.slice.call(arguments).filter(function(x){return x!=null&&x!=='';}).join(' · ');}
 function interp(v,pts){
   if(!hasNum(v))return null;
@@ -435,10 +432,10 @@ function computeMarket(idx,mar,fx,cg,stock,meta){
 }
 function lightMinus(warnHi,badHi,value){return value>badHi?'bad':value>warnHi?'warn':'ok';}
 function makeTile(label,display,sub,light){return {label:label,display:display,sub:sub||'',light:light};}
-function fallbackTile(groupName,label,meta){
+function fallbackTile(groupName,label){
   const item=snapItem(groupName,label);
-  if(!item)return makeTile(label,'—','沒有安全的快照可用','warn',meta);
-  return makeTile(label,item.display!=null?item.display:fmt(item.value),item.sub!=null?item.sub:(item.chg!=null?pc(item.chg):''),item.light||'warn',meta);
+  if(!item)return makeTile(label,'—','沒有安全的快照可用','warn');
+  return makeTile(label,item.display!=null?item.display:fmt(item.value),item.sub!=null?item.sub:(item.chg!=null?pc(item.chg):''),item.light||'warn');
 }
 function displayMeta(live,fallback){return live&&live.state!=='unavailable'?live:fallback;}
 function metaUsable(meta){return !!meta&&(meta.state==='latest'||meta.state==='snapshot');}
@@ -505,7 +502,7 @@ function safeAlerts(meta,stock){
   if(!alerts.length)alerts.push({level:'warn',txt:'本頁同時包含最新可用日資料與每日快照；各項資料截至日不同，請以卡片標示為準。'});
   return alerts;
 }
-function safeOutlook(meta,stock){
+function safeOutlook(){
   // 一週展望是「條件式情境+觸發條件」的框架(如站回60日線→偏多),非即時數字外插,因此一律顯示 BRIEF 發布的情境;
   // 但誠實標明發布日與當前即時資料狀態,不假裝是即時外推(保留 Codex 的資料誠實原則)。
   const base=BRIEF.outlook||{};
@@ -521,31 +518,31 @@ function buildMerged(L,meta,stock){
   const indexReady=meta.index.state!=='unavailable'&&hasNum(L.idx),marginReady=meta.margin.state!=='unavailable'&&hasNum(L.marPeak),fxReady=meta.fx.state!=='unavailable'&&hasNum(L.fx),cryptoReady=meta.crypto.state!=='unavailable'&&hasNum(L.btc)&&hasNum(L.eth);
   const indexMeta=displayMeta(meta.index,STATIC_META.taiwan),marginMeta=displayMeta(meta.margin,STATIC_META.margin),fxMeta=displayMeta(meta.fx,STATIC_META.fx);
   const stockItems=indexReady?[
-    makeTile('加權報酬指數',fmt(L.idx,0),pcs(L.d1),L.d1>=0?'ok':(L.d1<-0.03?'bad':'warn'),indexMeta),
-    makeTile('距 52 週高點',pcs(L.distHigh),'',L.distHigh>-0.05?'ok':(L.distHigh>-0.15?'warn':'bad'),indexMeta),
-    makeTile('vs 60 日線',pcs(L.vs60),'',L.vs60>=0?'ok':'warn',indexMeta),
-    makeTile('vs 200 日線',pcs(L.dev),'乖離',lightMinus(0.1,0.2,L.dev),indexMeta)
+    makeTile('加權報酬指數',fmt(L.idx,0),pcs(L.d1),L.d1>=0?'ok':(L.d1<-0.03?'bad':'warn')),
+    makeTile('距 52 週高點',pcs(L.distHigh),'',L.distHigh>-0.05?'ok':(L.distHigh>-0.15?'warn':'bad')),
+    makeTile('vs 60 日線',pcs(L.vs60),'',L.vs60>=0?'ok':'warn'),
+    makeTile('vs 200 日線',pcs(L.dev),'乖離',lightMinus(0.1,0.2,L.dev))
   ]:[
-    fallbackTile('台股','加權報酬指數',indexMeta),fallbackTile('台股','距 52 週高點',indexMeta),fallbackTile('台股','vs 60 日線',indexMeta),fallbackTile('台股','vs 200 日線',indexMeta)
+    fallbackTile('台股','加權報酬指數'),fallbackTile('台股','距 52 週高點'),fallbackTile('台股','vs 60 日線'),fallbackTile('台股','vs 200 日線')
   ];
   stockItems.push(hasNum(L.total)?makeTile('市場溫度',L.total+' / 100',joinSub(L.zone+'；評分表 v2'),L.total>=75?'bad':(L.total>=50?'warn':'ok')):makeTile('市場溫度','—','資料不足，未計算正式溫度：'+temperatureReason(meta,stock),'warn'));
-  stockItems.push(indexReady&&L.trendTxt?makeTile('趨勢燈',L.trendTxt,'依台股指數日資料',L.trend==='intact'?'ok':(L.trend==='weak'?'warn':'bad'),indexMeta):makeTile('趨勢燈','—','台股指數暫無可計算資料','warn',indexMeta));
+  stockItems.push(indexReady&&L.trendTxt?makeTile('趨勢燈',L.trendTxt,'依台股指數日資料',L.trend==='intact'?'ok':(L.trend==='weak'?'warn':'bad')):makeTile('趨勢燈','—','台股指數暫無可計算資料','warn'));
   const stockGroup={name:'台股與溫度計',items:stockItems,note:'台股指數：'+metaShort(indexMeta)};
   const moneyItems=[];
   if(marginReady){
-    moneyItems.push(makeTile('融資餘額（距峰值）',pcs(L.marPeak),L.marPeak<=-0.2?'投降訊號達標':'投降 −20% 未達',L.marPeak<=-0.2?'ok':'warn',marginMeta));
-    moneyItems.push(makeTile('融資 12 個月增速',pcs(L.mar12),'',lightMinus(0.1,0.3,L.mar12),marginMeta));
+    moneyItems.push(makeTile('融資餘額（距峰值）',pcs(L.marPeak),L.marPeak<=-0.2?'投降訊號達標':'投降 −20% 未達',L.marPeak<=-0.2?'ok':'warn'));
+    moneyItems.push(makeTile('融資 12 個月增速',pcs(L.mar12),'',lightMinus(0.1,0.3,L.mar12)));
   }else{
-    moneyItems.push(fallbackTile('資金面','融資餘額',marginMeta),fallbackTile('資金面','融資 12 個月增速',marginMeta));
+    moneyItems.push(fallbackTile('資金面','融資餘額'),fallbackTile('資金面','融資 12 個月增速'));
   }
-  moneyItems.push(fxReady?makeTile('美元／台幣',L.fx.toFixed(3),'5日 '+pcs(L.fx5),L.fx5>0.005?'warn':'ok',fxMeta):fallbackTile('資金面','美元/台幣',fxMeta));
+  moneyItems.push(fxReady?makeTile('美元／台幣',L.fx.toFixed(3),'5日 '+pcs(L.fx5),L.fx5>0.005?'warn':'ok'):fallbackTile('資金面','美元/台幣'));
   const moneyGroup={name:'資金面',items:moneyItems,note:'融資：'+metaShort(marginMeta)+'；美元／台幣：'+metaShort(fxMeta)};
   const globalGroup=cloneGroup(snapGroup('全球股市'),'全球股市（每日快照）',STATIC_META.global);
   const riskGroup=cloneGroup(snapGroup('利率'),'利率與風險（每日快照）',STATIC_META.risk);
   const preGroup=cloneGroup(snapGroup('盤前'),'盤前風向（快照＋加密資料）',STATIC_META.pre);
   preGroup.items=preGroup.items.map(function(item){
-    if(item.label.indexOf('比特幣')>=0&&cryptoReady)return makeTile(item.label,fmt(L.btc,0),pcs(L.btcC),L.btcC>=0?'ok':(L.btcC<-0.03?'bad':'warn'),meta.crypto);
-    if(item.label.indexOf('以太幣')>=0&&cryptoReady)return makeTile(item.label,fmt(L.eth,0),pcs(L.ethC),L.ethC>=0?'ok':'warn',meta.crypto);
+    if(item.label.indexOf('比特幣')>=0&&cryptoReady)return makeTile(item.label,fmt(L.btc,0),pcs(L.btcC),L.btcC>=0?'ok':(L.btcC<-0.03?'bad':'warn'));
+    if(item.label.indexOf('以太幣')>=0&&cryptoReady)return makeTile(item.label,fmt(L.eth,0),pcs(L.ethC),L.ethC>=0?'ok':'warn');
     return item;
   });
   preGroup.note='盤前資料：'+metaShort(STATIC_META.pre)+'；加密貨幣：'+metaShort(displayMeta(meta.crypto,STATIC_META.pre));
@@ -556,7 +553,7 @@ function buildMerged(L,meta,stock){
   const summaryZone=hasNum(L.total)?L.zone:(fallbackScore&&fallbackScore.zone);
   const summaryMeta=hasNum(L.total)?'依各來源資料截至日計算，非盤中即時報價；詳細來源見各區塊下方附註。':fallbackScore?'資料截至 '+BRIEF.date+' · 最後完整晨報快照，詳細來源見各區塊下方附註。':'';
   const headline=hasNum(L.total)?'市場溫度 '+L.total+'／100（'+L.zone+'）。依各來源資料截至日判讀，非盤中即時報價。':fallbackScore?'尚未以本次讀取資料重算；以下保留最後完整快照的市場溫度（'+summaryZone+'）。':'本頁未計算正式總溫度：'+temperatureReason(meta,stock)+'。';
-  return Object.assign({},BRIEF,{renderedAt:taipeiTimestamp(),headline:headline,summaryScore:summaryScore,summaryZone:summaryZone,summaryMeta:summaryMeta,alerts:safeAlerts(meta,stock),groups:[stockGroup,moneyGroup,globalGroup,riskGroup,preGroup,poolGroup],members:safeMembers(L,meta,stock),outlook:safeOutlook(meta,stock),predictions:safePredictions(stock)});
+  return Object.assign({},BRIEF,{renderedAt:taipeiTimestamp(),headline:headline,summaryScore:summaryScore,summaryZone:summaryZone,summaryMeta:summaryMeta,alerts:safeAlerts(meta,stock),groups:[stockGroup,moneyGroup,globalGroup,riskGroup,preGroup,poolGroup],members:safeMembers(L,meta,stock),outlook:safeOutlook(),predictions:safePredictions(stock)});
 }
 function statusText(){
   return '各區塊附註列出資料來源與截至日；卡片數值依可用快照計算，非盤中即時報價。';
@@ -578,14 +575,14 @@ async function refreshLive(){
   const stock=stockPoolInfo(result[4]);
   const L=computeMarket(result[0].data,result[1].data,result[2].data,result[3].data,stock,meta);
   renderAll(buildMerged(L,meta,stock));
-  st.textContent=statusText(meta,stock);
+  st.textContent=statusText();
 }
 // 先以明確標示的快照呈現；讀取完成後只替換成功且驗證過的來源。
 const INITIAL_META={index:initialMeta('FinMind'),margin:initialMeta('FinMind'),fx:initialMeta('FinMind'),crypto:initialMeta('CoinGecko')};
 renderAll(buildMerged(computeMarket(null,null,null,null,STOCK_POOL,INITIAL_META),INITIAL_META,STOCK_POOL));
 async function loadCanonicalStockSnapshot(){
   try{
-    const r=await fetch('data/stock-pool-snapshot.json',{cache:'no-store'});
+    const r=await fetch('data/stock-pool-snapshot.json',{cache:'no-cache'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     const s=await r.json();
     if(s.schemaVersion!==1||!Array.isArray(s.stocks)||s.stocks.length!==POOL_SIZE)throw new Error('schema or stock count');

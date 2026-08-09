@@ -206,6 +206,7 @@ await assert.rejects(() => atomicWriteJson(snapshotFile, { next: true }, { failB
 assert.equal(await fs.readFile(snapshotFile, 'utf8'), '{"old":true}\n');
 await atomicWriteJson(snapshotFile, { schemaVersion: 1, next: true });
 assert.deepEqual(JSON.parse(await fs.readFile(snapshotFile, 'utf8')), { schemaVersion: 1, next: true });
+assert.equal(await fs.readFile(snapshotFile, 'utf8'), '{"schemaVersion":1,"next":true}\n', 'canonical snapshot stays compact without changing JSON values');
 
 const [indexHtml, morningHtml] = await Promise.all([
   fs.readFile(new URL('../index.html', import.meta.url), 'utf8'),
@@ -213,12 +214,14 @@ const [indexHtml, morningHtml] = await Promise.all([
 ]);
 assert.match(indexHtml, /最後完成交易日/);
 assert.match(indexHtml, /非即時報價/);
+assert.match(indexHtml, /stock-pool-snapshot\.json',\{cache:'no-cache'\}/);
 assert.match(indexHtml, /dataInsufficient = s\.epsInsufficient===true \|\| !hasFourEPS/);
 assert.match(indexHtml, /const hasProv = !!s\.q1Period;/);
 assert.match(indexHtml, /dataPending = !hasProv;/);
 assert.match(indexHtml, /if\(dataPending\) M='資料待更新';/);
 assert.doesNotMatch(indexHtml, /dataStale = !hasProv/);
 assert.match(morningHtml, /meta\.state='snapshot';/);
+assert.match(morningHtml, /stock-pool-snapshot\.json',\{cache:'no-cache'\}/);
 assert.match(morningHtml, /資料截至 /);
 assert.match(morningHtml, /predictionDisplayStatus\(pred\)/);
 assert.match(morningHtml, /status==='overdue'\?'待結算'/);

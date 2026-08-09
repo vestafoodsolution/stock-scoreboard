@@ -258,7 +258,7 @@ function buildStocks(){
   const fund=(user.ver===DATA_VER && user.fund)?user.fund:{};   // 版本不符 → 不用舊 fetched 覆蓋新版內建
   const out=[];
   DEFAULT_DATA.forEach(d=>{ const c=String(d.code||''); if(!c||deletedCodes.includes(c)) return; // 只有明確 deletedCodes 才移除
-    let o=JSON.parse(JSON.stringify(d));
+    let o={...d};
     if(fund[c]){ const f=sanitizeStock(Object.assign({code:c,name:d.name}, fund[c])); if(f){ delete f.hold; Object.assign(o,f); o.code=c; o.name=d.name; } } // 同版本 fetched overlay
     o.hold = validHold(holds[c]!=null?holds[c]:o.hold);   // 合法 hold(有限且>0)依 code 併回,否則 null
     out.push(o); });
@@ -950,7 +950,7 @@ async function retryUpdate(s){
 document.getElementById('add').addEventListener('click',addStock);
 document.getElementById('reset').addEventListener('click',()=>{if(confirm('會覆蓋你的修改(含自訂股、持有價、已抓資料),還原成內建資料。確定?')){
   try{localStorage.removeItem(CUSTOM_KEY);localStorage.removeItem(USER_KEY);}catch(e){}
-  deletedCodes=[];saveDeleted(); stocks=JSON.parse(JSON.stringify(DEFAULT_DATA)); openIdx=null; save(); render();
+  deletedCodes=[];saveDeleted(); stocks=DEFAULT_DATA.map(s=>({...s})); openIdx=null; save(); render();
 }});
 document.getElementById('export').addEventListener('click',()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(stocks,null,1)],{type:'application/json'}));a.download='存股評分.json';a.click();});
 function stockPoolSourceText(snapshot){
@@ -977,7 +977,7 @@ function renderStockPoolSource(snapshot){
 // 一份完整 canonical；沒有 canonical 時才使用內嵌 DEFAULT_DATA。
 async function loadCanonicalStockSnapshot(){
   try{
-    const r=await fetch('data/stock-pool-snapshot.json',{cache:'no-store'});
+    const r=await fetch('data/stock-pool-snapshot.json',{cache:'no-cache'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     const s=await r.json();
     if(s.schemaVersion!==1||!Array.isArray(s.stocks)||s.stocks.length!==DEFAULT_DATA.length)throw new Error('schema or stock count');
