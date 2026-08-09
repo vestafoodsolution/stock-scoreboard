@@ -331,7 +331,8 @@ function stockPoolInfo(calendarResult){
   const priceMeta=makeStockPriceMeta(price.source||explicit.priceSource||explicit.source||'晨報股票池股價快照',priceAsOf,calendarResult);
   const snapshotAsOf=fundamentals.asOf||explicit.fundamentalsAsOf||priceAsOf;
   const fundamentalsMeta=makeQuarterlyMeta(fundamentals.source||explicit.fundamentalsSource||'晨報股票池財報／EPS快照',snapshotAsOf,fundamentals.periodEnd||explicit.fundamentalPeriodEnd,fundamentals.validUntil||explicit.fundamentalValidUntil,null);
-  return {medCheap:med,medAK:medAK,priceMeta:priceMeta,fundamentalsMeta:fundamentalsMeta};
+  const focusStocks=Array.isArray(explicit.stocks)?explicit.stocks.filter(function(item){return item&&['3260','1268'].indexOf(String(item.code))>=0;}):[];
+  return {medCheap:med,medAK:medAK,priceMeta:priceMeta,fundamentalsMeta:fundamentalsMeta,focusStocks:focusStocks};
 }
 let STOCK_POOL=stockPoolInfo();
 const STATIC_META={
@@ -473,9 +474,14 @@ function safePredictions(stock){
   });
 }
 function safeMembers(L,meta,stock){
-  return BRIEF.members; // A(Claude):一律顯示排程當天發布的大師評論(過期也顯示,資料日已見燈板/狀態列/各數字);葛拉漢等在估值過期時不再被改寫成「暫不判定」而消失。下方原降級邏輯保留但停用。
+  if(!CANONICAL_STOCK_POOL){
+    return BRIEF.members.map(function(member){return Object.assign({},member,{today:'股票池最新快照載入中；暫不引用舊價格或資料日。'});});
+  }
   const indexMeta=displayMeta(meta.index,STATIC_META.taiwan),marginMeta=displayMeta(meta.margin,STATIC_META.margin),fxMeta=displayMeta(meta.fx,STATIC_META.fx),cryptoMeta=displayMeta(meta.crypto,STATIC_META.pre);
   const totalText=hasNum(L.total)?'正式溫度 '+L.total+'／100（'+L.zone+'）':'正式總溫度暫不計算';
+  const focusStocks=stock.focusStocks||[];
+  const focusText=focusStocks.length?focusStocks.map(function(item){return item.name+' '+fmt(item.J);}).join('、'):'股票池指定個股';
+  const priceAsOf=stock.priceMeta.asOf||'最新可用資料日未提供';
   return BRIEF.members.map(function(member){
     let text='';
     if(member.id==='marks')text='台股指數為'+metaShort(indexMeta)+'。'+totalText+(L.trendTxt?'；趨勢燈 '+L.trendTxt+'。':'。')+'資料不足時不以舊溫度替代。';
@@ -483,7 +489,7 @@ function safeMembers(L,meta,stock){
     else if(member.id==='lynch')text='全球指數使用'+metaShort(STATIC_META.global)+'。這是每日快照，不把它寫成盤中或最新市場判斷。';
     else if(member.id==='dalio')text='加密貨幣為'+metaShort(cryptoMeta)+'；VIX、美元與美債使用'+metaShort(STATIC_META.risk)+'。資料不是同一時間點，不下即時風險結論。';
     else if(member.id==='graham')text='股票池估值資料：'+stockPoolMetaText(stock)+'。'+(stockValuationUsable(stock)&&hasNum(stock.medCheap)&&hasNum(stock.medAK)?'便宜度中位數 '+stock.medCheap.toFixed(2)+'，僅作各資料截至日的估值快照。':'估值不可用：'+stockPoolIssueText(stock)+'；缺少必要數值時才無法計算。');
-    else if(member.id==='buffett')text='股票池股價為'+metaShort(stock.priceMeta)+'；財報／EPS為'+metaShort(stock.fundamentalsMeta)+'。'+(stockPriceUsable(stock)?'不把可用快照價格當成盤中報價。':'股價資料不可用，不以它建議進出。');
+    else if(member.id==='buffett')text=stockPriceUsable(stock)?focusText+'的最新可用收盤價已更新至 '+priceAsOf+'；估值仍依財報／EPS資料日判讀。等待的過程本身不是成本——球還在飛，別提早揮棒。':'股票池股價資料不可用，不以它建議進出。';
     else text='規則先於敘事：'+totalText+'；台股為'+metaShort(indexMeta)+'；'+stockPoolMetaText(stock)+'。來源時間不同時，只提示資料限制，不延伸成即時結論。';
     return Object.assign({},member,{today:text});
   });
@@ -583,8 +589,9 @@ async function loadCanonicalStockSnapshot(){
     if(!r.ok)throw new Error('HTTP '+r.status);
     const s=await r.json();
     if(s.schemaVersion!==1||!Array.isArray(s.stocks)||s.stocks.length!==POOL_SIZE)throw new Error('schema or stock count');
-    CANONICAL_STOCK_POOL={price:s.price||{},fundamentals:s.fundamentals||{}};
+    CANONICAL_STOCK_POOL={price:s.price||{},fundamentals:s.fundamentals||{},stocks:s.stocks};
     STOCK_POOL=stockPoolInfo();
+    renderAll(buildMerged(computeMarket(null,null,null,null,STOCK_POOL,INITIAL_META),INITIAL_META,STOCK_POOL));
   }catch(e){/* Safe fallback: keep the embedded morning snapshot. */}
 }
 loadCanonicalStockSnapshot().finally(refreshLive);
