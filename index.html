@@ -958,7 +958,7 @@ function stockPoolSourceText(snapshot){
   const priceDate=price.asOf;
   const fallbackDate=stocks.map(s=>s.Jdate).filter(Boolean).sort().pop();
   const fundamentals=snapshot&&snapshot.fundamentals||{};
-  const epsDate=fundamentals.periodEnd||fundamentals.asOf||null;
+  const epsDate=fundamentals.asOf||fundamentals.periodEnd||null;
   const priceText=priceDate||fallbackDate||'未提供';
   const epsText=epsDate||'內嵌快照（季度期別未提供）';
   const priceSource=price.source||'TWSE／TPEx 官方日收盤資料；缺檔由 FinMind TaiwanStockPrice 補齊';
@@ -967,7 +967,7 @@ function stockPoolSourceText(snapshot){
   const period=fundamentals.periodEnd?' · 財報期間 '+fundamentals.periodEnd:'';
   const deadline=fundamentals.validUntil?' · 下次法定申報期限 '+fundamentals.validUntil:'';
   const valuation=fundamentals.periodEnd&&fundamentals.validUntil?' · 可納入正式估值':' · 估值狀態待確認';
-  return '股價：'+priceSource+' · 資料截至 '+priceText+' · 最後完成交易日 '+lastTrading+'；財報／EPS：'+fundamentalsSource+' · 資料截至 '+epsText+period+deadline+valuation+'；非即時報價。';
+  return '股價：股價資料快照 · '+priceSource+' · 資料截至 '+priceText+' · 最後完成交易日 '+lastTrading+'；財報／EPS：財報／EPS資料快照 · '+fundamentalsSource+' · 資料截至 '+epsText+period+deadline+valuation+'；非即時報價。';
 }
 function renderStockPoolSource(snapshot){
   const el=document.getElementById('pool-source');
