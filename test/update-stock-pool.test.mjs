@@ -211,7 +211,8 @@ const [indexHtml, morningHtml] = await Promise.all([
   fs.readFile(new URL('../index.html', import.meta.url), 'utf8'),
   fs.readFile(new URL('../morning.html', import.meta.url), 'utf8')
 ]);
-assert.match(indexHtml, /最後完整資料照此日期計算，非即時報價/);
+assert.match(indexHtml, /最後完成交易日/);
+assert.match(indexHtml, /非即時報價/);
 assert.match(indexHtml, /dataInsufficient = s\.epsInsufficient===true \|\| !hasFourEPS/);
 assert.match(indexHtml, /const hasProv = !!s\.q1Period;/);
 assert.match(indexHtml, /dataPending = !hasProv;/);
@@ -230,6 +231,10 @@ assert.match(morningHtml, /價格門檻過窄/);
 assert.match(morningHtml, /市場狀態轉折/);
 assert.match(morningHtml, /未達 10 筆校準門檻/);
 assert.match(morningHtml, /const memberRows=/);
+assert.match(morningHtml, /class="section-note"/);
+assert.match(morningHtml, /附註：\$\{g\.note\}/);
+assert.doesNotMatch(morningHtml, /item\.sub=joinSub\(item\.sub,stockPoolMetaText\(stock\)/);
+assert.doesNotMatch(morningHtml, /sub:joinSub\(sub,meta\?metaShort\(meta\):''\)/);
 assert.match(morningHtml, /if\(p\.status==='pending'&&valuationUnavailable/);
 assert.match(morningHtml, /if\(metaUsable\(meta\.index\)&&metaUsable\(meta\.margin\)/);
 assert.doesNotMatch(morningHtml, /股價已過期|財報已過有效期限/);

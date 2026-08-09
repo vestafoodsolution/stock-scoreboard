@@ -12,6 +12,7 @@ body{margin:0;font-family:"PingFang TC","Microsoft JhengHei",system-ui,sans-seri
 header{padding:18px 24px 8px}
 h1{margin:0 0 4px;font-size:20px}
 .sub{color:var(--sub);font-size:12.5px;max-width:1000px}
+.source-note{margin:8px 24px 0;padding:0 4px;color:var(--sub);font-size:11.5px;line-height:1.55;max-width:1200px}
 .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 24px}
 .toolbar input[type=search]{padding:7px 10px;border:1px solid var(--line);border-radius:8px;width:150px;font-size:13px}
 button{padding:7px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);cursor:pointer;font-size:13px;color:var(--txt)}
@@ -91,7 +92,6 @@ details.logic td,details.logic th{border:1px solid var(--line);padding:4px 8px;f
 <header>
   <h1>存股評分表 <span style="font-size:13px;color:var(--sub);font-weight:400">稅效退稅 + 高點防災</span> <span style="font-size:11px;background:#1d2733;color:#fff;border-radius:10px;padding:2px 8px;vertical-align:2px">版本 2026-07-17b</span></h1>
   <div class="sub">總分 = 稅效股利 + 填息力 + 防禦抗跌 + 品質,四支柱權重可用下方滑桿自己調。每項先換成固定級距分數再加權,單一項目不會主導。買進訊號要求「不貴」——高點時系統傾向叫你等,而不是追。<b>點任一檔的「建議」標籤</b>會彈出行動卡:該買/賣的價位、判斷理由、你的部位與稅務提醒。</div>
-  <div class="sub" id="pool-source">股票池資料載入中…</div>
 </header>
 
 <div class="gauge" id="gauge"></div>
@@ -176,6 +176,7 @@ details.logic td,details.logic th{border:1px solid var(--line);padding:4px 8px;f
 <tbody></tbody>
 </table>
 </div></div>
+<div class="source-note" id="pool-source">股票池資料載入中…</div>
 <div id="advpop"></div>
 
 <script>
@@ -953,13 +954,20 @@ document.getElementById('reset').addEventListener('click',()=>{if(confirm('會�
 }});
 document.getElementById('export').addEventListener('click',()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(stocks,null,1)],{type:'application/json'}));a.download='存股評分.json';a.click();});
 function stockPoolSourceText(snapshot){
-  const priceDate=snapshot&&snapshot.price&&snapshot.price.asOf;
+  const price=snapshot&&snapshot.price||{};
+  const priceDate=price.asOf;
   const fallbackDate=stocks.map(s=>s.Jdate).filter(Boolean).sort().pop();
   const fundamentals=snapshot&&snapshot.fundamentals||{};
   const epsDate=fundamentals.periodEnd||fundamentals.asOf||null;
   const priceText=priceDate||fallbackDate||'未提供';
   const epsText=epsDate||'內嵌快照（季度期別未提供）';
-  return '股票池：股價資料截至 '+priceText+'；財報／EPS資料截至 '+epsText+'。最後完整資料照此日期計算，非即時報價。';
+  const priceSource=price.source||'TWSE／TPEx 官方日收盤資料；缺檔由 FinMind TaiwanStockPrice 補齊';
+  const fundamentalsSource=fundamentals.source||'FinMind TaiwanStockFinancialStatements';
+  const lastTrading=price.lastCompletedTradingDate||priceDate||fallbackDate||'未提供';
+  const period=fundamentals.periodEnd?' · 財報期間 '+fundamentals.periodEnd:'';
+  const deadline=fundamentals.validUntil?' · 下次法定申報期限 '+fundamentals.validUntil:'';
+  const valuation=fundamentals.periodEnd&&fundamentals.validUntil?' · 可納入正式估值':' · 估值狀態待確認';
+  return '股價：'+priceSource+' · 資料截至 '+priceText+' · 最後完成交易日 '+lastTrading+'；財報／EPS：'+fundamentalsSource+' · 資料截至 '+epsText+period+deadline+valuation+'；非即時報價。';
 }
 function renderStockPoolSource(snapshot){
   const el=document.getElementById('pool-source');

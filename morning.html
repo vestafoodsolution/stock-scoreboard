@@ -23,6 +23,7 @@ nav a{font-size:12.5px;color:#1160c9;text-decoration:none;border:1px solid var(-
 .headline-copy{font-size:16.5px;line-height:1.65;flex:1}.headline-meta{margin-top:5px;color:#aeb8c4;font-size:11px;line-height:1.5}
 h2{font-size:14px;letter-spacing:1.5px;color:var(--sub);margin:30px 0 12px;text-transform:uppercase}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:10px}
+.section-note{margin:-4px 2px 18px;color:var(--sub);font-size:11px;line-height:1.55}
 .tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 13px;position:relative}
 .tile .k{font-size:11.5px;color:var(--sub);display:flex;align-items:center;gap:6px}
 .tile .v{font-size:18px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums}
@@ -148,11 +149,11 @@ function renderAll(D){
   document.getElementById('headmeta').textContent=D.summaryMeta||'';
   const alertsEl=document.getElementById('alerts');
   alertsEl.innerHTML=(D.alerts&&D.alerts.length)?'<div class="alerts">'+D.alerts.map(a=>`<div class="alert ${a.level==='warn'?'warn':''}">${a.level==='warn'?'🟡':'🔴'} ${a.txt}</div>`).join('')+'</div>':'';
-  document.getElementById('tiles').innerHTML=D.groups.map(g=>`<h2 style="margin-top:18px">${g.name}</h2><div class="grid">`+
+  document.getElementById('tiles').innerHTML=D.groups.map(g=>`<section class="metric-section"><h2 style="margin-top:18px">${g.name}</h2><div class="grid">`+
     g.items.map(t=>`<div class="tile ${t.light==='bad'?'bad':''}">
       <div class="k"><span class="dot ${t.light}"></span>${t.label}</div>
       <div class="v">${t.display??fmt(t.value)}</div>
-      <div class="d ${cls(t.chg)}">${t.sub??pc(t.chg)}</div></div>`).join('')+'</div>').join('');
+      <div class="d ${cls(t.chg)}">${t.sub??pc(t.chg)}</div></div>`).join('')+'</div>'+(g.note?`<div class="section-note">附註：${g.note}</div>`:'')+'</section>').join('');
   const memberRows=(D.members||[]).map(m=>{
     const judged=(D.predictions||[]).filter(p=>p.member===m.id&&(p.status==='hit'||p.status==='miss'));
     return judged.length?Object.assign({},m,{acc:{hit:judged.filter(p=>p.status==='hit').length,total:judged.length}}):m;
@@ -301,9 +302,10 @@ function snapItem(groupName,label){
 function cloneGroup(group,name,meta){
   const copy=group?JSON.parse(JSON.stringify(group)):{name:name,items:[]};
   copy.name=name||copy.name;
+  copy.note=meta?metaShort(meta):(copy.note||'');
   copy.items=copy.items.map(function(item){
     const base=item.sub!=null?item.sub:(item.chg!=null?pc(item.chg):'');
-    item.sub=joinSub(base,meta?metaShort(meta):'');
+    item.sub=base;
     return item;
   });
   return copy;
@@ -431,7 +433,7 @@ function computeMarket(idx,mar,fx,cg,stock,meta){
   return L;
 }
 function lightMinus(warnHi,badHi,value){return value>badHi?'bad':value>warnHi?'warn':'ok';}
-function makeTile(label,display,sub,light,meta){return {label:label,display:display,sub:joinSub(sub,meta?metaShort(meta):''),light:light};}
+function makeTile(label,display,sub,light){return {label:label,display:display,sub:sub||'',light:light};}
 function fallbackTile(groupName,label,meta){
   const item=snapItem(groupName,label);
   if(!item)return makeTile(label,'—','沒有安全的快照可用','warn',meta);
@@ -500,9 +502,8 @@ function safeAlerts(meta,stock){
 function safeOutlook(meta,stock){
   // 一週展望是「條件式情境+觸發條件」的框架(如站回60日線→偏多),非即時數字外插,因此一律顯示 BRIEF 發布的情境;
   // 但誠實標明發布日與當前即時資料狀態,不假裝是即時外推(保留 Codex 的資料誠實原則)。
-  const status='台股 '+metaShort(displayMeta(meta.index,STATIC_META.taiwan))+'；融資 '+metaShort(displayMeta(meta.margin,STATIC_META.margin))+'；股票池 '+stockPoolMetaText(stock)+'。';
   const base=BRIEF.outlook||{};
-  return Object.assign({},base,{_note:'以下為 '+BRIEF.date+' 發布之情境與觸發條件(條件式框架,非即時外插);即時資料狀態:'+status});
+  return Object.assign({},base,{_note:'以下為 '+BRIEF.date+' 發布之情境與觸發條件（條件式框架，非即時外插）；資料來源與截至日已列於上方各區塊附註。'});
 }
 function snapshotTemperature(){
   const group=(BRIEF.groups||[]).find(function(g){return g.name==='台股與溫度計';});
@@ -521,9 +522,9 @@ function buildMerged(L,meta,stock){
   ]:[
     fallbackTile('台股','加權報酬指數',indexMeta),fallbackTile('台股','距 52 週高點',indexMeta),fallbackTile('台股','vs 60 日線',indexMeta),fallbackTile('台股','vs 200 日線',indexMeta)
   ];
-  stockItems.push(hasNum(L.total)?makeTile('市場溫度',L.total+' / 100',joinSub(L.zone+'；評分表 v2',stockPoolMetaText(stock)),L.total>=75?'bad':(L.total>=50?'warn':'ok')):makeTile('市場溫度','—','資料不足，未計算正式溫度：'+temperatureReason(meta,stock),'warn'));
+  stockItems.push(hasNum(L.total)?makeTile('市場溫度',L.total+' / 100',joinSub(L.zone+'；評分表 v2'),L.total>=75?'bad':(L.total>=50?'warn':'ok')):makeTile('市場溫度','—','資料不足，未計算正式溫度：'+temperatureReason(meta,stock),'warn'));
   stockItems.push(indexReady&&L.trendTxt?makeTile('趨勢燈',L.trendTxt,'依台股指數日資料',L.trend==='intact'?'ok':(L.trend==='weak'?'warn':'bad'),indexMeta):makeTile('趨勢燈','—','台股指數暫無可計算資料','warn',indexMeta));
-  const stockGroup={name:'台股與溫度計',items:stockItems};
+  const stockGroup={name:'台股與溫度計',items:stockItems,note:'台股指數：'+metaShort(indexMeta)};
   const moneyItems=[];
   if(marginReady){
     moneyItems.push(makeTile('融資餘額（距峰值）',pcs(L.marPeak),L.marPeak<=-0.2?'投降訊號達標':'投降 −20% 未達',L.marPeak<=-0.2?'ok':'warn',marginMeta));
@@ -532,7 +533,7 @@ function buildMerged(L,meta,stock){
     moneyItems.push(fallbackTile('資金面','融資餘額',marginMeta),fallbackTile('資金面','融資 12 個月增速',marginMeta));
   }
   moneyItems.push(fxReady?makeTile('美元／台幣',L.fx.toFixed(3),'5日 '+pcs(L.fx5),L.fx5>0.005?'warn':'ok',fxMeta):fallbackTile('資金面','美元/台幣',fxMeta));
-  const moneyGroup={name:'資金面',items:moneyItems};
+  const moneyGroup={name:'資金面',items:moneyItems,note:'融資：'+metaShort(marginMeta)+'；美元／台幣：'+metaShort(fxMeta)};
   const globalGroup=cloneGroup(snapGroup('全球股市'),'全球股市（每日快照）',STATIC_META.global);
   const riskGroup=cloneGroup(snapGroup('利率'),'利率與風險（每日快照）',STATIC_META.risk);
   const preGroup=cloneGroup(snapGroup('盤前'),'盤前風向（快照＋加密資料）',STATIC_META.pre);
@@ -541,27 +542,18 @@ function buildMerged(L,meta,stock){
     if(item.label.indexOf('以太幣')>=0&&cryptoReady)return makeTile(item.label,fmt(L.eth,0),pcs(L.ethC),L.ethC>=0?'ok':'warn',meta.crypto);
     return item;
   });
+  preGroup.note='盤前資料：'+metaShort(STATIC_META.pre)+'；加密貨幣：'+metaShort(displayMeta(meta.crypto,STATIC_META.pre));
   const poolGroup=cloneGroup(snapGroup('股票池'),'你的股票池（59 檔；股價日更、財報季更）');
-  poolGroup.items.forEach(function(item){
-    item.sub=joinSub(item.sub,stockPoolMetaText(stock),stockValuationUsable(stock)&&hasNum(stock.medCheap)&&hasNum(stock.medAK)?'可納入正式估值':'不納入溫度／預測判定：'+stockPoolIssueText(stock));
-  });
+  poolGroup.note=stockPoolMetaText(stock)+'；'+(stockValuationUsable(stock)&&hasNum(stock.medCheap)&&hasNum(stock.medAK)?'可納入正式估值':'不納入溫度／預測判定：'+stockPoolIssueText(stock));
   const fallbackScore=snapshotTemperature();
   const summaryScore=hasNum(L.total)?L.total:(fallbackScore&&fallbackScore.score);
   const summaryZone=hasNum(L.total)?L.zone:(fallbackScore&&fallbackScore.zone);
-  const summaryMeta=hasNum(L.total)?'資料截至：台股 '+(indexMeta.asOf||'—')+' · 融資 '+(marginMeta.asOf||'—')+' · 股票池 '+stockPoolMetaText(stock):fallbackScore?'資料截至 '+BRIEF.date+' · 最後完整晨報快照，尚未以本次讀取資料重算。':'';
+  const summaryMeta=hasNum(L.total)?'依各來源資料截至日計算，非盤中即時報價；詳細來源見各區塊下方附註。':fallbackScore?'資料截至 '+BRIEF.date+' · 最後完整晨報快照，詳細來源見各區塊下方附註。':'';
   const headline=hasNum(L.total)?'市場溫度 '+L.total+'／100（'+L.zone+'）。依各來源資料截至日判讀，非盤中即時報價。':fallbackScore?'尚未以本次讀取資料重算；以下保留最後完整快照的市場溫度（'+summaryZone+'）。':'本頁未計算正式總溫度：'+temperatureReason(meta,stock)+'。';
   return Object.assign({},BRIEF,{renderedAt:taipeiTimestamp(),headline:headline,summaryScore:summaryScore,summaryZone:summaryZone,summaryMeta:summaryMeta,alerts:safeAlerts(meta,stock),groups:[stockGroup,moneyGroup,globalGroup,riskGroup,preGroup,poolGroup],members:safeMembers(L,meta,stock),outlook:safeOutlook(meta,stock),predictions:safePredictions(stock)});
 }
-function sourceStatus(label,live,fallback){return label+'：'+metaText(live,true)+(live.state==='unavailable'?'；畫面資料為 '+metaShort(fallback):'');}
-function statusText(meta,stock){
-  return [
-    sourceStatus('台股指數',meta.index,STATIC_META.taiwan),
-    sourceStatus('融資',meta.margin,STATIC_META.margin),
-    sourceStatus('美元／台幣',meta.fx,STATIC_META.fx),
-    sourceStatus('加密貨幣',meta.crypto,STATIC_META.pre),
-    '全球／VIX／美債：'+metaShort(STATIC_META.global),
-    '股票池：'+stockPoolMetaText(stock||STOCK_POOL)
-  ].join('　｜　');
+function statusText(){
+  return '各區塊附註列出資料來源與截至日；卡片數值依可用快照計算，非盤中即時報價。';
 }
 function startDate(days){return taipeiDate(Date.now()-days*86400000);}
 function initialMeta(source){return unavailableMeta(source,null,null);}
