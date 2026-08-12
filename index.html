@@ -42,6 +42,7 @@ tr.open td{background:#eef4fc!important}
 .badge.buy{background:#e2f5ea;color:var(--buy)} .badge.div{background:#e5eefb;color:var(--div)}
 .badge.hold{background:#f7f0da;color:var(--hold)} .badge.sell{background:#fbe7e5;color:var(--sell)}
 .badge.watch{background:#ececf1;color:var(--watch)}
+.result-note{display:block;margin-top:3px;max-width:150px;white-space:normal;color:var(--sub);font-size:10.5px;font-weight:400;line-height:1.35}
 .pos{color:var(--buy)} .neg{color:var(--sell)}
 .ok{background:#eaf6ef} .bad{background:#fdf0ef}
 .warn{color:var(--warnc);font-size:11px}
@@ -184,6 +185,8 @@ const DEFAULT_DATA = [{"name": "緯穎", "code": "6669", "type": "stock", "J": 4
 // 固定、版本化的市場母體:個人新增/刪除觀察股「不」影響市場溫度
 const UNIVERSE = DEFAULT_DATA;
 const DATA_VER = '2026-07-17b';   // 內建資料版本;每次更新 DEFAULT_DATA 一併改,舊快取視為過期,不讓它覆蓋新版基本面
+let BASE_DATA = DEFAULT_DATA;
+let BASE_VERSION = DATA_VER;
 const MKT_VER = 3;                // 市場溫度演算法版本;改演算法時遞增,使舊 stock-market-v1 快取失效
 
 let MARKET = {"date": "2026-07-17", "dev": 0.2612, "idx12m": 0.9383, "levChg": 0.388, "excess": -0.2839, "medCheap": 0.47, "medAK": -0.0459, "distHigh": -0.1007, "trend": "weak", "t_dev": 91, "t_lev": 50, "t_val": 96, "total": 79.0, "zone": "過熱(亢奮期)", "sample": UNIVERSE.length, "ver": MKT_VER};
@@ -255,9 +258,9 @@ function buildStocks(){
   migrateOld();
   const user=loadUser()||{ver:null,holds:{},fund:{}};
   const holds=user.holds||{};
-  const fund=(user.ver===DATA_VER && user.fund)?user.fund:{};   // 版本不符 → 不用舊 fetched 覆蓋新版內建
+  const fund=(user.ver===BASE_VERSION && user.fund)?user.fund:{};   // 版本不符 → 不用舊 fetched 覆蓋新版基準
   const out=[];
-  DEFAULT_DATA.forEach(d=>{ const c=String(d.code||''); if(!c||deletedCodes.includes(c)) return; // 只有明確 deletedCodes 才移除
+  BASE_DATA.forEach(d=>{ const c=String(d.code||''); if(!c||deletedCodes.includes(c)) return; // 只有明確 deletedCodes 才移除
     let o={...d};
     if(fund[c]){ const f=sanitizeStock(Object.assign({code:c,name:d.name}, fund[c])); if(f){ delete f.hold; Object.assign(o,f); o.code=c; o.name=d.name; } } // 同版本 fetched overlay
     o.hold = validHold(holds[c]!=null?holds[c]:o.hold);   // 合法 hold(有限且>0)依 code 併回,否則 null
@@ -274,7 +277,7 @@ function save(){
       const f={}; for(const k in s){ if(k==='hold'||k==='name'||k==='code') continue; f[k]=s[k]; } fund[c]=f; // fetched/編輯 overlay
     } else { custom.push(s); }                                             // 代號∉內建 → 自訂股
   });
-  try{ localStorage.setItem(USER_KEY, JSON.stringify({ver:DATA_VER, holds, fund}));
+  try{ localStorage.setItem(USER_KEY, JSON.stringify({ver:BASE_VERSION, holds, fund}));
        localStorage.setItem(CUSTOM_KEY, JSON.stringify(custom));
        localStorage.setItem(DEL_KEY, JSON.stringify(deletedCodes)); }catch(e){}
 }
@@ -334,18 +337,29 @@ const HOT_DESC={
   weak:'見頂疑慮:趨勢轉弱(跌破60日線或距高點>8%)。停發所有買進;「貴且填息差」的持股亮減碼燈。',
   broken:'防禦執行:指數跌破200日線。全面防禦——便宜度<0.8 的持股亮減碼燈,現金優先。'
 };
-// 固定母體=DEFAULT_DATA 的代號集合(數量固定);但每檔取「最新已更新的同代號資料」(完整更新後中位數會更新)。
+// 固定母體=DEFAULT_DATA 的代號集合(數量固定);數值以最新 canonical 為基準。
 // 個人新增/刪除觀察股不改母體(自訂代號不在母體;刪除的內建股仍以最新已知值留在母體)。
+function excludedFrom(s,key){return !!(s&&s.dataStatus&&Array.isArray(s.dataStatus.excludedFrom)&&s.dataStatus.excludedFrom.includes(key));}
+function analysisExclusionReasons(s){
+  const status=s&&s.dataStatus||{},reasons=[];
+  if(status.price==='missing')reasons.push('當次股價缺漏');
+  if(status.fundamentals==='missing')reasons.push('當次財報／EPS 缺漏');
+  const marked=['valuation','score','signal'].filter(key=>excludedFrom(s,key));
+  if(marked.length&&!reasons.length)reasons.push('來源標記排除估值／評分／訊號');
+  else if(marked.includes('valuation'))reasons.push('估值資料不完整');
+  return [...new Set(reasons)];
+}
+function analysisExcluded(s){return analysisExclusionReasons(s).length>0;}
 function marketUniverse(){
   const byCode={}; stocks.forEach(s=>{ if(s.code) byCode[String(s.code)]=s; });
-  return DEFAULT_DATA.map(d=>byCode[String(d.code)]||d);   // 固定代號,值優先取 live(已更新),否則內建
+  return BASE_DATA.map(d=>byCode[String(d.code)]||d);   // 固定代號,值優先取使用者同版本更新,否則 canonical
 }
 function marketMedians(){
   const U=marketUniverse();
   // 零股利股 cheap=0 是「無股利」假象,不納入便宜度中位以免虛拉溫度
-  const cheaps=U.filter(s=>nn(s.divYldAll)>0).map(s=>nn(s.cheap)).filter(v=>v!=null&&isFinite(v)&&v>0).sort((a,b)=>a-b);
+  const cheaps=U.filter(s=>!analysisExcluded(s)&&!excludedFrom(s,'medCheap')&&nn(s.divYldAll)>0).map(s=>nn(s.cheap)).filter(v=>v!=null&&isFinite(v)&&v>0).sort((a,b)=>a-b);
   const med=cheaps.length?cheaps[Math.floor(cheaps.length/2)]:1;
-  const aks=U.map(s=>nn(s.AK)).filter(v=>v!=null&&isFinite(v)).sort((a,b)=>a-b);
+  const aks=U.filter(s=>!analysisExcluded(s)&&!excludedFrom(s,'medAK')).map(s=>nn(s.AK)).filter(v=>v!=null&&isFinite(v)).sort((a,b)=>a-b);
   const medAK=aks.length?aks[Math.floor(aks.length/2)]:0;
   return {med,medAK,cheapN:cheaps.length};
 }
@@ -397,6 +411,16 @@ function score(s){
   const ttmEPS=qs.every(v=>v==null)?null:qs.reduce((a,b)=>a+z(b),0);
   const epsNeg=ttmEPS!=null&&ttmEPS<=0;
   const payout=(nn(s.div1)!=null&&ttmEPS&&ttmEPS>0)?nn(s.div1)/ttmEPS:null;
+  const exclusionReasons=analysisExclusionReasons(s);
+  if(exclusionReasons.length){
+    return {
+      ttmEPS,payout,sub:{tax:null,fill:null,defense:null,quality:null},total:null,items:[],M:'本次排除',
+      cheapP:null,fairP:null,expP:null,bandMode:null,farBand:false,
+      flags:{dataPending:false,dataInsufficient:true,dataStale:false,sourceExcluded:true,persistentLoss:false,roeBad:false,divBroken:false},
+      ds:divState(s),noSignal:true,etf,taxUnknown:etf&&nn(s.etfTaxCreditRatio)==null,
+      excluded:true,exclusionReasons,exclusionReason:exclusionReasons.join('、')
+    };
+  }
   const items=[];
   // exclIf=不適用欄位:整項不計分、不列入(不給中性 5 分湊總分);與 neutralIf(缺資料給中性)不同
   function it(p,label,sv,raw,rawFmt,neutralIf,exclIf){ if(exclIf) return; let sc=sv,neu=false; if(neutralIf||sc==null){sc=5;neu=true;} items.push({p,label,sc,raw,rawFmt,neu}); }
@@ -456,7 +480,7 @@ function score(s){
   const roeBad = nn(s.roe)!=null && s.roe<0;                          // 淨值報酬為負=品質惡化
   const divBroken = !etf && nn(s.div1)===0 && nn(s.div5)!=null && s.div5>0; // 曾配息今停配=股利政策破壞
   const fundamentalSell = !etf && (persistentLoss||roeBad||divBroken);
-  const flags={dataPending,dataInsufficient,dataStale,persistentLoss,roeBad,divBroken};
+  const flags={dataPending,dataInsufficient,dataStale,sourceExcluded:false,persistentLoss,roeBad,divBroken};
   let M;
   if(dataPending) M='資料待更新';
   else if(dataInsufficient||cheap==null) M='資料不足';
@@ -498,8 +522,8 @@ function score(s){
 const fmt=(v,d=2)=>v==null||!isFinite(v)?'—':v.toLocaleString('zh-TW',{minimumFractionDigits:d,maximumFractionDigits:d});
 const pct=v=>v==null||!isFinite(v)?'—':(v*100).toFixed(1)+'%';
 const cls=v=>v==null?'':(v>=0?'pos':'neg');
-const scCls=v=>v>=65?'hi':v>=55?'mid':v<40?'lo':'';
-const badge=m=>{const map={'買進':'buy','買進(嚴選)':'buy','配息':'div','待填息':'div','持有':'hold','賣出':'sell','減碼':'sell','減碼(過熱)':'sell','觀察':'watch','觀察(偏貴)':'watch','觀察(過熱)':'watch','排除':'watch','資料不足':'watch','資料待更新':'watch'};return `<span class="badge ${map[m]||'watch'}">${m||'—'}</span>`;};
+const scCls=v=>v==null?'':v>=65?'hi':v>=55?'mid':v<40?'lo':'';
+const badge=m=>{const map={'買進':'buy','買進(嚴選)':'buy','配息':'div','待填息':'div','持有':'hold','賣出':'sell','減碼':'sell','減碼(過熱)':'sell','觀察':'watch','觀察(偏貴)':'watch','觀察(過熱)':'watch','排除':'watch','資料不足':'watch','資料待更新':'watch','本次排除':'watch'};return `<span class="badge ${map[m]||'watch'}">${m||'—'}</span>`;};
 function rawFmt(v,t){ if(v==null||!isFinite(v))return '—';
   if(t==='pct')return (v*100).toFixed(1)+'%'; if(t==='x')return v.toFixed(2)+'×';
   if(t==='y')return v+' 年'; if(t==='ratio')return v.toFixed(2); if(t==='day')return v+' 天';
@@ -523,8 +547,8 @@ function rowHTML(s,c){
   const ei=epsInfo(s,c);
   const band=(c.cheapP!=null&&nn(s.J)!=null)?(s.J<=c.cheapP?'ok':(c.expP!=null&&s.J>=c.expP?'bad':'')):'';
   return `<td><span class="rowdel" title="刪除這檔">✕</span>${s.name}${need?' <span class="warn" title="尚未抓完整基本面(等額度補),防禦/填息以中性計">待</span>':''}</td>
-    <td>${s.code||''}</td><td>${badge(c.M)}</td>
-    <td class="sc ${scCls(c.total)}">${c.total.toFixed(1)}</td>
+    <td>${s.code||''}</td><td>${badge(c.M)}${c.exclusionReason?`<small class="result-note">${c.exclusionReason}</small>`:''}</td>
+    <td class="sc ${scCls(c.total)}">${c.total==null?'—':c.total.toFixed(1)}</td>
     <td class="pillcell">${c.sub.tax==null?'—':c.sub.tax.toFixed(0)}</td><td class="pillcell">${c.sub.fill==null?'—':c.sub.fill.toFixed(0)}</td>
     <td class="pillcell">${c.sub.defense==null?'—':c.sub.defense.toFixed(0)}</td><td class="pillcell" title="${c.sub.quality==null?'ETF 無公司品質構面,不計入總分':''}">${c.sub.quality==null?'—':c.sub.quality.toFixed(0)}</td>
     <td class="${band}" title="${s.Jdate?'資料截至 '+s.Jdate+'；非即時報價':''}">${fmt(nn(s.J))}</td>
@@ -569,6 +593,7 @@ const FIELDS=[['J','股價'],['divEarn1','盈餘現金股利'],['div1','總現�
 const PILL_META={tax:['稅效股利',W.tax],fill:['填息力',W.fill],defense:['防禦抗跌',W.defense],quality:['品質',W.quality]};
 function brkHTML(c){
   let html='<h4>分數組成(權重可調)</h4>', cur='';
+  if(c.excluded)return html+`<div class="result-note" style="max-width:none">本次排除：${c.exclusionReason}。舊值只供辨識，不計入四支柱、總分、訊號或價位帶。</div><div class="tot"><span>總分</span><span>—</span></div>`;
   for(const it of c.items){
     if(it.p!==cur){ cur=it.p; html+=`<div class="pil"><span>${PILL_META[cur][0]} <span class="w">權重 ${W[cur]}</span></span><span>${c.sub[cur].toFixed(0)}/100</span></div>`; }
     html+=`<div class="row"><span class="lbl">${it.label} <span style="color:#aab">${rawFmt(it.raw,it.rawFmt)}</span></span><span class="${it.neu?'neu':''}">${it.sc.toFixed(1)}/10${it.neu?'(中性)':''}</span></div>`;
@@ -627,6 +652,8 @@ function adviceHTML(s,c){
     act=`基本面賣出——出清,不等回本。原因:${why}。回本價是你的心理錨點,不是這門生意的價值;台股沒有證所稅,實現虧損零稅務代價,資金移往高分標的的機會成本更低。`;
   }else if(M==='排除'){
     act=`總分 ${c.total.toFixed(0)}(低於 40):列為<b>排除/不加碼</b>——這不是叫你賣出,而是新資金別投入。若已持有,續抱觀察體質是否回升;要出場請等出現「基本面賣出」訊號(持續虧損、ROE 轉負、停配),別因低分就殺出。`;
+  }else if(M==='本次排除'){
+    act=`${c.exclusionReason}。此檔保留最後已知數值供辨識，但<b>不參與本次中位數、四支柱、總分、買賣訊號或價位帶</b>；其餘有資料個股仍正常完成分析。`;
   }else if(M==='資料待更新'){
     act=`此檔尚未取得可信來源期間(內建靜態資料或公司行動未正規化),<b>預設不產生買/賣/減碼,也不給價格帶</b>(安全優先)。按上方「完整更新」或展開該列「重試更新這檔」抓齊連續四季 EPS、股利、除息日與公司行動調整後,才會發訊號。`;
   }else if(M==='資料不足'){
@@ -637,7 +664,7 @@ function adviceHTML(s,c){
   L.push(`<div class="advsec"><b class="h">行動</b>${act}</div>`);
   const weak=c.items.filter(i=>!i.neu&&i.sc<5).sort((a,b)=>a.sc-b.sc).slice(0,3);
   const strong=c.items.filter(i=>!i.neu&&i.sc>=8).sort((a,b)=>b.sc-a.sc).slice(0,2);
-  let why2=`總分 ${c.total.toFixed(1)};市場 ${G.total.toFixed(0)} 度(${STANCE[G.zone].name}、${TREND_TXT[G.trend]})。`;
+  let why2=c.excluded?`本次資料排除：${c.exclusionReason}。`:`總分 ${c.total.toFixed(1)};市場 ${G.total.toFixed(0)} 度(${STANCE[G.zone].name}、${TREND_TXT[G.trend]})。`;
   if(weak.length) why2+=`扣分主因:${weak.map(i=>`${i.label} ${rawFmt(i.raw,i.rawFmt)}`).join('、')}。`;
   if(strong.length) why2+=`強項:${strong.map(i=>`${i.label} ${rawFmt(i.raw,i.rawFmt)}`).join('、')}。`;
   L.push(`<div class="advsec"><b class="h">理由</b>${why2}</div>`);
@@ -950,7 +977,7 @@ async function retryUpdate(s){
 document.getElementById('add').addEventListener('click',addStock);
 document.getElementById('reset').addEventListener('click',()=>{if(confirm('會覆蓋你的修改(含自訂股、持有價、已抓資料),還原成內建資料。確定?')){
   try{localStorage.removeItem(CUSTOM_KEY);localStorage.removeItem(USER_KEY);}catch(e){}
-  deletedCodes=[];saveDeleted(); stocks=DEFAULT_DATA.map(s=>({...s})); openIdx=null; save(); render();
+  deletedCodes=[];saveDeleted(); stocks=BASE_DATA.map(s=>({...s})); openIdx=null; save(); render();
 }});
 document.getElementById('export').addEventListener('click',()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(stocks,null,1)],{type:'application/json'}));a.download='存股評分.json';a.click();});
 function stockPoolSourceText(snapshot){
@@ -967,21 +994,69 @@ function stockPoolSourceText(snapshot){
   const period=fundamentals.periodEnd?' · 財報期間 '+fundamentals.periodEnd:'';
   const deadline=fundamentals.validUntil?' · 下次法定申報期限 '+fundamentals.validUntil:'';
   const valuation=fundamentals.periodEnd&&fundamentals.validUntil?' · 可納入正式估值':' · 估值狀態待確認';
-  return '股價：股價資料快照 · '+priceSource+' · 資料截至 '+priceText+' · 最後完成交易日 '+lastTrading+'；財報／EPS：財報／EPS資料快照 · '+fundamentalsSource+' · 資料截至 '+epsText+period+deadline+valuation+'；非即時報價。';
+  const priceCoverage=price.coverage?' · 分析涵蓋 '+price.coverage:'';
+  const priceExcluded=Array.isArray(price.excludedCodes)&&price.excludedCodes.length?' · 本次排除 '+price.excludedCodes.join('、'):'';
+  const fundamentalsCoverage=fundamentals.coverage?' · 分析涵蓋 '+fundamentals.coverage:'';
+  const fundamentalsExcluded=Array.isArray(fundamentals.excludedCodes)&&fundamentals.excludedCodes.length?' · 本次排除 '+fundamentals.excludedCodes.join('、'):'';
+  return '股價：股價資料快照 · '+priceSource+' · 資料截至 '+priceText+' · 最後完成交易日 '+lastTrading+priceCoverage+priceExcluded+'；財報／EPS：財報／EPS資料快照 · '+fundamentalsSource+' · 資料截至 '+epsText+period+deadline+fundamentalsCoverage+fundamentalsExcluded+valuation+'；非即時報價。';
 }
 function renderStockPoolSource(snapshot){
   const el=document.getElementById('pool-source');
   if(el)el.textContent=stockPoolSourceText(snapshot);
 }
-// 更新器只寫這一份 canonical;抓取或驗證失敗時不覆寫舊檔，畫面維持最後
-// 一份完整 canonical；沒有 canonical 時才使用內嵌 DEFAULT_DATA。
+function hasFixedUniverse(rows){
+  if(!Array.isArray(rows)||rows.length!==DEFAULT_DATA.length)return false;
+  const expected=new Set(DEFAULT_DATA.map(s=>String(s.code||''))),codes=rows.map(s=>String(s&&s.code||'')),actual=new Set(codes);
+  return actual.size===expected.size&&codes.every(code=>expected.has(code));
+}
+function validSnapshotDate(value){
+  if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;
+  const d=new Date(value+'T00:00:00Z');
+  return !isNaN(d)&&d.toISOString().slice(0,10)===value;
+}
+function sameCodes(a,b){const x=[...new Set(a)].sort(),y=[...new Set(b)].sort();return x.length===y.length&&x.every((code,i)=>code===y[i]);}
+function validCoverage(meta,denominator,missingCodes,statusesPresent){
+  if(!meta||typeof meta.coverage!=='string')return false;
+  const m=/^(\d+)\/(\d+)$/.exec(meta.coverage);if(!m||+m[2]!==denominator||+m[1]!==denominator-missingCodes.length)return false;
+  const excluded=meta.excludedCodes==null?[]:meta.excludedCodes.map(String);
+  return Array.isArray(meta.excludedCodes)||(!statusesPresent&&missingCodes.length===0)
+    ?new Set(excluded).size===excluded.length&&sameCodes(excluded,missingCodes):false;
+}
+function validRowStatuses(rows){
+  const present=rows.map(row=>row&&row.dataStatus!=null),count=present.filter(Boolean).length;
+  if(count===0)return {ok:true,present:false,priceMissing:[],fundamentalsMissing:[]};
+  if(count!==rows.length)return {ok:false};
+  const priceMissing=[],fundamentalsMissing=[];
+  for(const row of rows){
+    const code=String(row.code||''),s=row.dataStatus,ex=s&&s.excludedFrom;
+    if(!s||!['ok','missing'].includes(s.price)||!['ok','missing','na'].includes(s.fundamentals)||!['ok','missing'].includes(s.cheap)||!['ok','missing','na'].includes(s.medAK)||!Array.isArray(ex)||new Set(ex).size!==ex.length)return {ok:false};
+    if(s.price==='missing'){priceMissing.push(code);if(!ex.includes('price'))return {ok:false};}else if(ex.includes('price'))return {ok:false};
+    if(s.fundamentals==='missing'){fundamentalsMissing.push(code);if(!ex.includes('fundamentals'))return {ok:false};}else if(ex.includes('fundamentals'))return {ok:false};
+    if(s.cheap==='missing'&&!['medCheap','score','signal'].every(key=>ex.includes(key)))return {ok:false};
+    if(s.medAK==='missing'&&!['medAK','score','signal'].every(key=>ex.includes(key)))return {ok:false};
+  }
+  return {ok:true,present:true,priceMissing,fundamentalsMissing};
+}
+function validateCanonicalSnapshot(s){
+  if(!s||s.schemaVersion!==1||!hasFixedUniverse(s.stocks))return false;
+  const anchor=(typeof s.generatedAt==='string'&&Number.isFinite(Date.parse(s.generatedAt)))||validSnapshotDate(s.price&&s.price.asOf);
+  if(!anchor)return false;
+  const status=validRowStatuses(s.stocks);if(!status.ok)return false;
+  const fundamentalsN=s.stocks.filter(row=>row.type!=='etf').length;
+  return validCoverage(s.price,DEFAULT_DATA.length,status.priceMissing,status.present)
+    &&validCoverage(s.fundamentals,fundamentalsN,status.fundamentalsMissing,status.present);
+}
+// 更新器只寫這一份 canonical；來源少量缺檔時保留固定名單並標記排除，
+// 低於最低分析涵蓋率才不覆寫。沒有 canonical 時才使用內嵌 DEFAULT_DATA。
 async function loadCanonicalStockSnapshot(){
   try{
     const r=await fetch('data/stock-pool-snapshot.json',{cache:'no-cache'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     const s=await r.json();
-    if(s.schemaVersion!==1||!Array.isArray(s.stocks)||s.stocks.length!==DEFAULT_DATA.length)throw new Error('schema or stock count');
-    stocks=s.stocks;
+    if(!validateCanonicalSnapshot(s))throw new Error('invalid canonical snapshot');
+    BASE_DATA=s.stocks.map(x=>({...x}));
+    BASE_VERSION='snapshot:'+(s.generatedAt||s.price&&s.price.asOf||'unknown');
+    stocks=buildStocks();
     if(s.fundamentals&&Number.isFinite(Number(s.fundamentals.medAK)))MARKET={...MARKET,medAK:Number(s.fundamentals.medAK)};
     render();
     renderStockPoolSource(s);

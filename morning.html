@@ -57,10 +57,11 @@ h2{font-size:14px;letter-spacing:1.5px;color:var(--sub);margin:30px 0 12px;text-
 .preds td{padding:8px 12px;border-top:1px solid #eef1f4;vertical-align:top}
 .badge{display:inline-block;padding:1px 8px;border-radius:12px;font-size:11px;font-weight:600}
 .badge.pending{background:#eef1f4;color:var(--sub)}
-.badge.overdue{background:#fdf6e3;color:#8a6500}
+.badge.settling{background:#fdf6e3;color:#8a6500}
 .badge.hit{background:#e2f5ea;color:var(--ok)}
 .badge.miss{background:#fbe7e5;color:var(--bad)}
 .badge.unavailable{background:#fdf6e3;color:#8a6500}
+.prediction-note{margin-top:4px;max-width:280px;color:var(--sub);font-size:10.5px;line-height:1.45}
 .hist{font-size:12.5px;color:var(--sub);line-height:1.9}
 .predreview{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
 .review-card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:13px 15px;font-size:12.5px;line-height:1.65}
@@ -134,9 +135,7 @@ const PREDICTION_VERIFICATIONS={
   p9:{status:'miss',result:'結算：07-20 至 08-04 費半日內最低 10,445.44，跌破 11,000，未中。',review:{type:'市場狀態轉折',finding:'費半不只跌破 11,000，還下探至 10,445.44，代表半導體賣壓比基準情境更嚴重。',next:'下次加入「跌破支撐即切換偏空」的風險分支，並用趨勢確認與波動緩衝，不只押注一個不破位。'}},
   p10:{status:'hit',result:'結算：到期前最新可用股票池便宜度中位數 0.476，低於 0.55，命中。'}
 };
-function predictionDisplayStatus(pred){
-  return pred.status==='pending'&&validDate(pred.due)&&pred.due<taipeiDate()?'overdue':pred.status;
-}
+function predictionDisplayStatus(pred){return pred.status==='pending'&&validDate(pred.due)&&pred.due<taipeiDate()?'settling':pred.status;}
 function renderAll(D){
   document.getElementById('bdate').textContent='晨報快照日 '+D.date+' · 檢視時間 '+(D.renderedAt||taipeiTimestamp())+'（台北）';
   document.getElementById('headtxt').textContent=D.headline;
@@ -177,7 +176,7 @@ function renderAll(D){
   const nameOf=id=>{const m=memberRows.find(x=>x.id===id);return m?m.name:id;};
   document.querySelector('#predtbl tbody').innerHTML=D.predictions.map(p=>{const status=predictionDisplayStatus(p);return `<tr>
     <td>${nameOf(p.member)}</td><td>${p.claim}</td><td>${p.due}</td>
-    <td><span class="badge ${status}">${status==='pending'?'觀察中':status==='overdue'?'待結算':status==='hit'?'✓ 命中':status==='unavailable'?'暫不判定':'✗ 未中'}</span></td></tr>`;}).join('');
+    <td><span class="badge ${status}">${status==='pending'?'觀察中':status==='settling'?'待結算':status==='hit'?'✓ 命中':status==='miss'?'✗ 未中':'資料不足'}</span>${p.result?`<div class="prediction-note">${p.result}</div>`:''}</td></tr>`;}).join('');
   const reviews=(D.predictions||[]).filter(p=>p.review);
   document.getElementById('predreview').innerHTML=`<div class="review-policy">${PREDICTION_CALIBRATION_POLICY}</div>`+reviews.map(p=>{
     const sample=memberRows.find(m=>m.id===p.member)?.acc?.total||0;
@@ -189,7 +188,8 @@ function renderAll(D){
 
 // ===== 資料來源、時區與新鮮度 =====
 const TP_TZ='Asia/Taipei';
-const POOL_SIZE=59; // ⚠ 股票池檔數:變更時 index.html 的 DEFAULT_DATA、此常數、scripts/update-stock-pool.mjs 三處須一致
+const POOL_CODES=Object.freeze('6669,5283,6112,8044,8454,2317,2454,2330,2303,2409,2912,1216,5904,2729,1268,2327,2492,3026,3556,2915,9945,1532,2855,6016,2002,1101,1102,1802,3008,2404,1305,2881,2603,2618,6176,2108,3260,6121,2357,3034,1301,1702,2890,0056,3702,5871,2727,1737,2886,1817,2748,2379,6005,6195,3078,1537,1227,2548,6581'.split(','));
+const POOL_SIZE=POOL_CODES.length;
 const STATE_TEXT={latest:'最新可用日資料',snapshot:'資料快照',stale:'資料快照',unavailable:'暫無資料'};
 function taipeiParts(value){
   const p={};
@@ -315,6 +315,11 @@ function inferStockPriceAsOf(){
   return hit?BRIEF.date.slice(0,4)+'-'+hit[1]+'-'+hit[2]:null;
 }
 let CANONICAL_STOCK_POOL=null;
+function stockExcluded(item,key){return !!(item&&item.dataStatus&&Array.isArray(item.dataStatus.excludedFrom)&&item.dataStatus.excludedFrom.indexOf(key)>=0);}
+function stockPriceMissing(item){return !!(item&&item.dataStatus&&(item.dataStatus.price==='missing'||stockExcluded(item,'price')));}
+function stockFundamentalsMissing(item){return !!(item&&item.dataStatus&&(item.dataStatus.fundamentals==='missing'||stockExcluded(item,'fundamentals')));}
+function stockAnalysisExcluded(item){return stockPriceMissing(item)||stockFundamentalsMissing(item)||['valuation','score','signal'].some(function(key){return stockExcluded(item,key);});}
+function medianNumbers(values){const xs=values.filter(hasNum).sort(function(a,b){return a-b;});return xs.length?xs[Math.floor(xs.length/2)]:null;}
 function stockPoolInfo(calendarResult){
   const explicit=CANONICAL_STOCK_POOL||(BRIEF.sourceMeta&&BRIEF.sourceMeta.stockPool?BRIEF.sourceMeta.stockPool:{});
   // 新快照格式記錄股價日與財報期末；舊 canonical 仍可使用其最後完整
@@ -322,14 +327,32 @@ function stockPoolInfo(calendarResult){
   const price=explicit.price||{};
   const fundamentals=explicit.fundamentals||explicit.fundamental||{};
   const item=snapItem('股票池','便宜度');
-  const med=numberOrNull(price.medCheap!=null?price.medCheap:(item?item.value:null));
-  const medAK=numberOrNull(fundamentals.medAK!=null?fundamentals.medAK:explicit.medAK);
   const priceAsOf=price.asOf||explicit.priceAsOf||explicit.asOf||inferStockPriceAsOf();
   const priceMeta=makeStockPriceMeta(price.source||explicit.priceSource||explicit.source||'晨報股票池股價快照',priceAsOf,calendarResult);
   const snapshotAsOf=fundamentals.asOf||explicit.fundamentalsAsOf||priceAsOf;
   const fundamentalsMeta=makeQuarterlyMeta(fundamentals.source||explicit.fundamentalsSource||'晨報股票池財報／EPS快照',snapshotAsOf,fundamentals.periodEnd||explicit.fundamentalPeriodEnd,fundamentals.validUntil||explicit.fundamentalValidUntil,null);
-  const focusStocks=Array.isArray(explicit.stocks)?explicit.stocks.filter(function(item){return item&&['3260','1268'].indexOf(String(item.code))>=0;}):[];
-  return {medCheap:med,medAK:medAK,priceMeta:priceMeta,fundamentalsMeta:fundamentalsMeta,focusStocks:focusStocks};
+  const poolStocks=Array.isArray(explicit.stocks)?explicit.stocks:[];
+  const focusStocks=poolStocks.filter(function(row){return row&&['3260','1268'].indexOf(String(row.code))>=0;});
+  const priceExcluded=Array.isArray(price.excludedCodes)?price.excludedCodes.map(String):poolStocks.filter(function(row){return stockExcluded(row,'medCheap');}).map(function(row){return String(row.code);});
+  const fundamentalsExcluded=Array.isArray(fundamentals.excludedCodes)?fundamentals.excludedCodes.map(String):poolStocks.filter(function(row){return stockExcluded(row,'medAK');}).map(function(row){return String(row.code);});
+  const analyzable=poolStocks.filter(function(row){return !stockAnalysisExcluded(row);});
+  const cheapSample=analyzable.filter(function(row){return !stockExcluded(row,'medCheap')&&hasNum(numberOrNull(row.divYldAll))&&numberOrNull(row.divYldAll)>0&&hasNum(numberOrNull(row.cheap))&&numberOrNull(row.cheap)>0;});
+  const medRecomputed=medianNumbers(cheapSample.map(function(row){return numberOrNull(row.cheap);}));
+  const medMeta=numberOrNull(price.medCheap);
+  const med=CANONICAL_STOCK_POOL?medRecomputed:numberOrNull(item?item.value:null);
+  const akSample=analyzable.filter(function(row){return !stockExcluded(row,'medAK')&&hasNum(numberOrNull(row.AK));});
+  const medAK=CANONICAL_STOCK_POOL?medianNumbers(akSample.map(function(row){return numberOrNull(row.AK);})):numberOrNull(fundamentals.medAK!=null?fundamentals.medAK:explicit.medAK);
+  const yields=analyzable.map(function(row){return numberOrNull(row.divYldAll);}).filter(function(value){return hasNum(value)&&value>0;});
+  const cheapStocks=cheapSample.filter(function(row){return numberOrNull(row.cheap)>=1;});
+  const medMatches=!hasNum(medMeta)||!hasNum(medRecomputed)||Math.abs(medMeta-medRecomputed)<0.0005;
+  return {
+    medCheap:med,medAK:medAK,priceMeta:priceMeta,fundamentalsMeta:fundamentalsMeta,focusStocks:focusStocks,
+    yieldMedian:medianNumbers(yields),cheapStocks:cheapStocks,
+    priceCoverage:price.coverage||(poolStocks.length?analyzable.length+'/'+poolStocks.length:null),
+    fundamentalsCoverage:fundamentals.coverage||null,priceExcluded:priceExcluded,fundamentalsExcluded:fundamentalsExcluded,
+    canonicalValid:!!CANONICAL_STOCK_POOL,analyzableCount:analyzable.length,cheapSampleSize:cheapSample.length,akSampleSize:akSample.length,
+    medCheapMetadata:medMeta,medCheapMismatch:!medMatches
+  };
 }
 let STOCK_POOL=stockPoolInfo();
 const STATIC_META={
@@ -442,7 +465,16 @@ function metaUsable(meta){return !!meta&&(meta.state==='latest'||meta.state==='s
 function stockPriceUsable(stock){return !!stock&&metaUsable(stock.priceMeta);}
 function stockFundamentalsUsable(stock){return !!stock&&metaUsable(stock.fundamentalsMeta);}
 function stockValuationUsable(stock){return stockPriceUsable(stock)&&stockFundamentalsUsable(stock);}
-function stockPoolMetaText(stock){return '股價：'+metaShort(stock.priceMeta)+'；財報／EPS：'+metaShort(stock.fundamentalsMeta);}
+function coverageText(label,coverage,excluded){
+  let text=coverage?label+'分析涵蓋 '+coverage:'';
+  if(excluded&&excluded.length)text+=(text?'，':'')+'本次排除 '+excluded.join('、');
+  return text;
+}
+function stockPoolMetaText(stock){
+  const priceCoverage=coverageText('股價',stock.priceCoverage,stock.priceExcluded);
+  const fundamentalsCoverage=coverageText('財報／EPS',stock.fundamentalsCoverage,stock.fundamentalsExcluded);
+  return '股價：'+metaShort(stock.priceMeta)+(priceCoverage?'，'+priceCoverage:'')+'；財報／EPS：'+metaShort(stock.fundamentalsMeta)+(fundamentalsCoverage?'，'+fundamentalsCoverage:'');
+}
 function stockPoolIssueText(stock){
   const missing=[];
   if(!stockPriceUsable(stock))missing.push(stateText(stock.priceMeta));
@@ -465,8 +497,9 @@ function safePredictions(stock){
     const valuationUnavailable=!stockValuationUsable(stock)||!hasNum(stock.medCheap)||!hasNum(stock.medAK);
     if(p.status==='pending'&&valuationUnavailable&&/便宜度|股票池/.test(p.claim+' '+p.verify)){
       const reason='股票池估值不可用：'+stockPoolIssueText(stock);
-      return Object.assign({},p,{claim:p.claim+'（'+reason+'，暫不判定）',status:'unavailable'});
+      return Object.assign({},p,{claim:p.claim+'（'+reason+'）',status:'unavailable',result:'到期後未取得完整可驗證資料，暫無法判定命中或未中。'});
     }
+    if(p.status==='pending'&&validDate(p.due)&&p.due<taipeiDate())return Object.assign({},p,{status:'unavailable',result:'到期後未取得完整可驗證資料，暫無法判定命中或未中。'});
     return p;
   });
 }
@@ -477,7 +510,8 @@ function safeMembers(L,meta,stock){
   const indexMeta=displayMeta(meta.index,STATIC_META.taiwan),marginMeta=displayMeta(meta.margin,STATIC_META.margin),fxMeta=displayMeta(meta.fx,STATIC_META.fx),cryptoMeta=displayMeta(meta.crypto,STATIC_META.pre);
   const totalText=hasNum(L.total)?'正式溫度 '+L.total+'／100（'+L.zone+'）':'正式總溫度暫不計算';
   const focusStocks=stock.focusStocks||[];
-  const focusText=focusStocks.length?focusStocks.map(function(item){return item.name+' '+fmt(item.J);}).join('、'):'股票池指定個股';
+  const focusText=focusStocks.length?focusStocks.map(function(item){return stockPriceMissing(item)?item.name+'本次缺價（最後已知 '+fmt(item.J)+'，截至 '+(item.Jdate||'未提供')+'）':item.name+' '+fmt(item.J);}).join('、'):'股票池指定個股';
+  const focusHasMissing=focusStocks.some(stockPriceMissing);
   const priceAsOf=stock.priceMeta.asOf||'最新可用資料日未提供';
   return BRIEF.members.map(function(member){
     let text='';
@@ -485,9 +519,9 @@ function safeMembers(L,meta,stock){
     else if(member.id==='kost')text='融資為'+metaShort(marginMeta)+'；美元／台幣為'+metaShort(fxMeta)+'。'+(hasNum(L.marPeak)?'融資距峰值 '+pcs(L.marPeak)+'，僅依各自資料截至日判讀。':'不對籌碼強弱作即時判斷。');
     else if(member.id==='lynch')text='全球指數使用'+metaShort(STATIC_META.global)+'。這是每日快照，不把它寫成盤中或最新市場判斷。';
     else if(member.id==='dalio')text='加密貨幣為'+metaShort(cryptoMeta)+'；VIX、美元與美債使用'+metaShort(STATIC_META.risk)+'。資料不是同一時間點，不下即時風險結論。';
-    else if(member.id==='graham')text='股票池估值資料：'+stockPoolMetaText(stock)+'。'+(stockValuationUsable(stock)&&hasNum(stock.medCheap)&&hasNum(stock.medAK)?'便宜度中位數 '+stock.medCheap.toFixed(2)+'，僅作各資料截至日的估值快照。':'估值不可用：'+stockPoolIssueText(stock)+'；缺少必要數值時才無法計算。');
-    else if(member.id==='buffett')text=stockPriceUsable(stock)?focusText+'的最新可用收盤價已更新至 '+priceAsOf+'；估值仍依財報／EPS資料日判讀。等待的過程本身不是成本——球還在飛，別提早揮棒。':'股票池股價資料不可用，不以它建議進出。';
-    else text='規則先於敘事：'+totalText+'；台股為'+metaShort(indexMeta)+'；'+stockPoolMetaText(stock)+'。來源時間不同時，只提示資料限制，不延伸成即時結論。';
+    else if(member.id==='graham')text=stockValuationUsable(stock)&&hasNum(stock.medCheap)&&hasNum(stock.medAK)?'股票池便宜度中位數 '+stock.medCheap.toFixed(2)+'，EPS 成長中位數 '+pcs(stock.medAK)+'。缺資料個股已從本次計算排除，不會拖住其餘分析。':'估值不可用：'+stockPoolIssueText(stock)+'；缺少必要數值時才無法計算。';
+    else if(member.id==='buffett')text=stockPriceUsable(stock)?focusText+(focusHasMissing?'；缺資料者不作本次價位判斷，其餘個股照常分析。':'的收盤價已更新至 '+priceAsOf+'；估值仍依財報／EPS資料日判讀。'):'股票池股價資料不可用，不以它建議進出。';
+    else text='規則先於敘事：'+totalText+'；台股為'+metaShort(indexMeta)+'。資料來源時間不同時，只提示限制，不延伸成即時結論。';
     return Object.assign({},member,{today:text});
   });
 }
@@ -547,6 +581,12 @@ function buildMerged(L,meta,stock){
   });
   preGroup.note='盤前資料：'+metaShort(STATIC_META.pre)+'；加密貨幣：'+metaShort(displayMeta(meta.crypto,STATIC_META.pre));
   const poolGroup=cloneGroup(snapGroup('股票池'),'你的股票池（59 檔；股價日更、財報季更）');
+  const cheapNames=(stock.cheapStocks||[]).map(function(row){return row.name;});
+  poolGroup.items=[
+    makeTile('便宜度中位數',hasNum(stock.medCheap)?stock.medCheap.toFixed(2):'—','常態=1；僅計入本次有效資料',hasNum(stock.medCheap)&&stock.medCheap>=1?'ok':'bad'),
+    makeTile('殖利率中位數',hasNum(stock.yieldMedian)?(stock.yieldMedian*100).toFixed(2)+'%':'—','排除零股利與本次缺價',hasNum(stock.yieldMedian)&&stock.yieldMedian>=0.05?'ok':'warn'),
+    makeTile('進入便宜區檔數',cheapNames.length+' / '+((stock.priceCoverage||'0/0').split('/')[0]),cheapNames.length?cheapNames.join('、'):'本次無',cheapNames.length?'warn':'bad')
+  ];
   poolGroup.note=stockPoolMetaText(stock)+'；'+(stockValuationUsable(stock)&&hasNum(stock.medCheap)&&hasNum(stock.medAK)?'可納入正式估值':'不納入溫度／預測判定：'+stockPoolIssueText(stock));
   const fallbackScore=snapshotTemperature();
   const summaryScore=hasNum(L.total)?L.total:(fallbackScore&&fallbackScore.score);
@@ -585,7 +625,9 @@ async function loadCanonicalStockSnapshot(){
     const r=await fetch('data/stock-pool-snapshot.json',{cache:'no-cache'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     const s=await r.json();
-    if(s.schemaVersion!==1||!Array.isArray(s.stocks)||s.stocks.length!==POOL_SIZE)throw new Error('schema or stock count');
+    const codes=Array.isArray(s.stocks)?s.stocks.map(function(row){return String(row&&row.code||'');}):[];
+    const expected=new Set(POOL_CODES),actual=new Set(codes);
+    if(s.schemaVersion!==1||codes.length!==POOL_SIZE||actual.size!==POOL_SIZE||codes.some(function(code){return !expected.has(code);}))throw new Error('schema or fixed stock universe');
     CANONICAL_STOCK_POOL={price:s.price||{},fundamentals:s.fundamentals||{},stocks:s.stocks};
     STOCK_POOL=stockPoolInfo();
     renderAll(buildMerged(computeMarket(null,null,null,null,STOCK_POOL,INITIAL_META),INITIAL_META,STOCK_POOL));

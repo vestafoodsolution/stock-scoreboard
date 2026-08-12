@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 /*
- * Daily price-only stock-pool snapshot updater.
+ * Stock-pool snapshot updater.
  *
- * This script deliberately does NOT fetch or infer financial statements.  It
- * only carries forward the existing dividend / EPS inputs and recalculates the
- * price-dependent cheapness value.  A run fails before writing if every pool
- * member is not covered by an official closing-price response.
+ * The fixed 59-member roster is always preserved.  Official source gaps are
+ * filled from FinMind TaiwanStockPrice, but a snapshot is valid only when all
+ * 59 members have a usable price for the requested date.
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -20,6 +19,7 @@ const args = new Set(process.argv.slice(2));
 const dryRun = !args.has('--write');
 const requestedDate = [...args].find(a => a.startsWith('--date='))?.slice(7) || taipeiDate();
 const target = [...args].find(a => a.startsWith('--target='))?.slice(9) || 'price';
+export const FIXED_STOCK_CODES = Object.freeze('6669,5283,6112,8044,8454,2317,2454,2330,2303,2409,2912,1216,5904,2729,1268,2327,2492,3026,3556,2915,9945,1532,2855,6016,2002,1101,1102,1802,3008,2404,1305,2881,2603,2618,6176,2108,3260,6121,2357,3034,1301,1702,2890,0056,3702,5871,2727,1737,2886,1817,2748,2379,6005,6195,3078,1537,1227,2548,6581'.split(','));
 
 function taipeiDate(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -37,6 +37,56 @@ function num(value) {
 function median(values) {
   const xs = values.filter(Number.isFinite).sort((a, b) => a - b);
   return xs.length ? xs[Math.floor(xs.length / 2)] : null; // matches index.html currentGauge()
+}
+
+function taipeiMinutes(now = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(now).map(part => [part.type, part.value]));
+  return Number(parts.hour) * 60 + Number(parts.minute);
+}
+
+export function assertPriceDateReady(date, now = new Date()) {
+  if (date === taipeiDate(now) && taipeiMinutes(now) < 14 * 60) {
+    throw new Error(`price date ${date} is not ready before the Taiwan market close`);
+  }
+}
+
+function normalizedCode(stock) {
+  const raw = typeof stock === 'string' ? stock : stock?.code;
+  const code = String(raw ?? '').trim();
+  return /^\d{4,6}$/.test(code) ? code.padStart(4, '0') : null;
+}
+
+export function validateUniverse(stocks, referenceStocks = FIXED_STOCK_CODES) {
+  if (!Array.isArray(stocks) || !Array.isArray(referenceStocks)) throw new Error('stock universe mismatch: roster must be an array');
+  const codes = stocks.map(normalizedCode);
+  const expected = referenceStocks.map(normalizedCode);
+  const unique = new Set(codes);
+  const expectedUnique = new Set(expected);
+  if (codes.includes(null) || expected.includes(null) || expectedUnique.size !== expected.length ||
+      codes.length !== expected.length || unique.size !== expected.length || expected.some(code => !unique.has(code))) {
+    throw new Error(`stock universe mismatch: expected ${expected.length} unique fixed members`);
+  }
+  return true;
+}
+
+function dataStatus(stock, patch = {}) {
+  const current = stock.dataStatus || {};
+  const status = {
+    price: current.price || 'ok',
+    fundamentals: current.fundamentals || (stock.type === 'etf' ? 'na' : 'ok'),
+    cheap: current.cheap || (current.price === 'missing' ? 'missing' : 'ok'),
+    medAK: current.medAK || (current.fundamentals === 'missing' ? 'missing' : (stock.type === 'etf' ? 'na' : 'ok')),
+    ...patch
+  };
+  const excludedFrom = [];
+  if (status.price === 'missing') excludedFrom.push('price');
+  if (status.cheap === 'missing') excludedFrom.push('medCheap', 'score', 'signal');
+  if (status.fundamentals === 'missing') excludedFrom.push('fundamentals');
+  if (status.medAK === 'missing') excludedFrom.push('medAK', 'score', 'signal');
+  status.excludedFrom = [...new Set(excludedFrom)];
+  return status;
 }
 
 function parseEmbeddedJson(text, name, end = ';') {
@@ -129,7 +179,6 @@ export async function officialPrices(date, options = {}) {
 
 const FINMIND_MAX_ATTEMPTS = 3;
 const FINMIND_RETRY_DELAYS_MS = [1000, 2000];
-const FINMIND_PRICE_LOOKBACK_DAYS = 30;
 
 function finMindUrl(code, start, token = process.env.FINMIND_TOKEN?.trim()) {
   const params = new URLSearchParams({
@@ -200,30 +249,22 @@ async function finMindPriceRecord(code, date, options = {}) {
   const body = await response.json();
   if (body.status !== 200 || !Array.isArray(body.data)) throw new Error(`FinMind price data unavailable for ${code}`);
   const rows = body.data
-    .filter(item => /^\d{4}-\d{2}-\d{2}$/.test(String(item.date)) && String(item.date) <= date && num(item.close) != null && num(item.close) > 0)
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
-  const row = options.allowPrior ? rows[0] : rows.find(item => String(item.date) === date);
+    .filter(item => String(item.date) === date && num(item.close) != null && num(item.close) > 0);
+  const row = rows[0];
   const close = num(row?.close);
   if (close == null || close <= 0) throw new Error(`FinMind price missing for ${code} on ${date}`);
   return { close, asOf: String(row.date) };
 }
 
 export async function finMindPrice(code, date, options = {}) {
-  // By default request one exact trading date.  A neighboring date is never
-  // accepted as a substitute unless the caller explicitly opts into a
-  // bounded lookback for an official no-trade/missing row.
+  // Only the exact requested trading date is valid; never relabel an older
+  // close as the requested day's price.
   return (await finMindPriceRecord(code, date, options)).close;
-}
-
-function offsetDate(date, days) {
-  const value = new Date(`${date}T00:00:00Z`);
-  if (!Number.isFinite(value.getTime())) throw new Error(`cannot offset invalid date: ${date}`);
-  value.setUTCDate(value.getUTCDate() + days);
-  return value.toISOString().slice(0, 10);
 }
 
 export async function pricesWithFallback(stocks, date, options = {}) {
   const { fetchImpl = fetch, sleep, ...requestOptions } = options;
+  assertPriceDateReady(date, options.now || new Date());
   const official = await officialPricesDetailed(date, { fetchImpl, tolerateErrors: true });
   const codes = [...new Set(stocks.map(stock => String(stock.code || '').padStart(4, '0')))].filter(code => /^\d{4,6}$/.test(code));
   const missing = codes.filter(code => !official.prices.has(code));
@@ -236,24 +277,7 @@ export async function pricesWithFallback(stocks, date, options = {}) {
     while (queue.length) {
       const code = queue.shift();
       try {
-        let record;
-        try {
-          record = await finMindPriceRecord(code, date, { fetchImpl, sleep, ...requestOptions });
-        } catch (error) {
-          if (!error.message.startsWith('FinMind price missing')) throw error;
-          // Some securities have no trade on the requested day and therefore
-          // legitimately have no official close.  Carry forward only the
-          // latest real FinMind close within a bounded window, preserving its
-          // own source date in Jdate instead of presenting it as today's trade.
-          record = await finMindPriceRecord(code, date, {
-            fetchImpl,
-            sleep,
-            ...requestOptions,
-            start: offsetDate(date, -FINMIND_PRICE_LOOKBACK_DAYS),
-            end: date,
-            allowPrior: true
-          });
-        }
+        const record = await finMindPriceRecord(code, date, { fetchImpl, sleep, ...requestOptions });
         fallback.set(code, record.close);
         fallbackDates.set(code, record.asOf);
       } catch (error) {
@@ -261,34 +285,66 @@ export async function pricesWithFallback(stocks, date, options = {}) {
       }
     }
   }));
-  if (failures.length) throw new Error(`price coverage failed: FinMind補檔失敗：${failures.join('; ')}`);
+  const excludedCodes = missing.filter(code => !fallback.has(code));
+  if (failures.length || excludedCodes.length) {
+    const details = failures.length ? failures.join('; ') : excludedCodes.join(', ');
+    throw new Error(`price coverage failed (${codes.length - excludedCodes.length}/${codes.length}): FinMind補檔失敗：${details}`);
+  }
   return {
     prices: new Map([...official.prices, ...fallback]),
     officialErrors: official.errors,
-    fallbackCodes: missing,
-    fallbackDates
+    fallbackCodes: [...fallback.keys()],
+    fallbackDates,
+    excludedCodes,
+    failures
   };
 }
 
 export function buildCandidate(stocks, prices, asOf, priceDates = new Map()) {
-  const missing = [];
+  const excludedCodes = [];
   const updated = stocks.map(stock => {
-    const code = String(stock.code || '').padStart(4, '0');
+    const code = normalizedCode(stock);
     const close = prices.get(code);
-    if (!code || close == null || close <= 0 || num(stock.J) == null || num(stock.cheap) == null) {
-      missing.push(`${stock.name || code}(${code || '無代號'})`);
-      return stock;
+    if (!code || close == null || close <= 0) {
+      excludedCodes.push(code || String(stock.code ?? ''));
+      return { ...stock, dataStatus: dataStatus(stock, { price: 'missing', cheap: 'missing' }) };
     }
-    // Existing formula: cheap = (trailing dividend yield / 5y average yield).
-    // On a price-only day the numerator changes solely with price, so this is
-    // exactly oldCheap × oldClose / newClose while dividends remain unchanged.
-    const cheap = +(num(stock.cheap) * num(stock.J) / close).toFixed(3);
-    return { ...stock, J: close, Jdate: priceDates.get(code) || asOf, cheap };
+    const divEarn = num(stock.divEarn1);
+    const divAll = num(stock.div1);
+    const averageYield = num(stock.avgYld5);
+    const divYldEarn = divEarn == null ? null : +(divEarn / close).toFixed(4);
+    const divYldAll = divAll == null ? null : +(divAll / close).toFixed(4);
+    const cheap = divAll != null && averageYield > 0 ? +((divAll / close) / averageYield).toFixed(3) : null;
+    return {
+      ...stock,
+      J: close,
+      Jdate: priceDates.get(code) || asOf,
+      divYldEarn,
+      divYldAll,
+      cheap,
+      dataStatus: dataStatus(stock, { price: 'ok', cheap: cheap != null && divYldAll > 0 ? 'ok' : 'missing' })
+    };
   });
-  if (missing.length) throw new Error(`coverage/validation failed (${missing.length}/${stocks.length}): ${missing.join(', ')}`);
-  const medCheap = median(updated.map(s => num(s.cheap)));
+  const covered = stocks.length - excludedCodes.length;
+  if (excludedCodes.length) {
+    const labels = excludedCodes.join(', ');
+    throw new Error(`coverage/validation failed (${covered}/${stocks.length}): ${labels}`);
+  }
+  const medCheapValues = updated
+    .filter(stock => !stock.dataStatus?.excludedFrom?.includes('medCheap') && num(stock.divYldAll) > 0)
+    .map(stock => num(stock.cheap));
+  const medCheap = median(medCheapValues);
   if (medCheap == null) throw new Error('median cheapness missing after validation');
-  return { updated, medCheap: +medCheap.toFixed(3) };
+  const cheapSampleSize = medCheapValues.filter(Number.isFinite).length;
+  return {
+    updated,
+    medCheap: +medCheap.toFixed(3),
+    covered,
+    priceCovered: covered,
+    cheapSampleSize,
+    medCheapSample: cheapSampleSize,
+    excludedCodes
+  };
 }
 
 function validUntilFor(periodEnd) {
@@ -304,7 +360,19 @@ function validUntilFor(periodEnd) {
   return null;
 }
 
-function statementIndex(rows) {
+const CORPORATE_ACTIONS = {
+  // 國巨 2025-08-25 股票面額由 10 元變更為 2.5 元；變更前每股數字需除以 4
+  // 才能與變更後 EPS 放在同一個每股基準比較。
+  '2327': [{ effectiveDate: '2025-08-25', factor: 4 }]
+};
+
+function corporateActionFactor(code, periodEnd) {
+  return (CORPORATE_ACTIONS[code] || []).reduce((factor, action) => (
+    periodEnd < action.effectiveDate ? factor * action.factor : factor
+  ), 1);
+}
+
+function statementIndex(rows, code) {
   const byType = new Map();
   const validRows = rows.filter(row => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && num(row.value) != null)
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -314,7 +382,8 @@ function statementIndex(rows) {
       entry = { values: new Map(), conflicts: new Set() };
       byType.set(row.type, entry);
     }
-    const value = num(row.value);
+    const rawValue = num(row.value);
+    const value = row.type === 'EPS' ? rawValue / corporateActionFactor(code, row.date) : rawValue;
     if (entry.values.has(row.date) && entry.values.get(row.date) !== value) entry.conflicts.add(row.date);
     entry.values.set(row.date, value);
   }
@@ -357,15 +426,22 @@ function completePeriods(values, conflicts, count = 8) {
 
 function commonLatestPeriod(required, statementsByCode) {
   const availability = required.map(stock => {
-    const code = String(stock.code || '').padStart(4, '0');
+    const code = normalizedCode(stock);
     const { values, conflicts } = valuesByPeriod(statementsByCode.get(code), 'EPS');
-    return { stock, periods: completePeriods(values, conflicts) };
+    return { code, periods: completePeriods(values, conflicts) };
   });
-  const withoutEightQuarters = availability.filter(item => item.periods.size === 0).map(item => `${item.stock.name || item.stock.code}(${item.stock.code || '無代號'})`);
-  if (withoutEightQuarters.length) throw new Error(`fundamental coverage failed: EPS找不到完整連續8季的股票：${withoutEightQuarters.join(', ')}`);
-  const shared = [...availability[0].periods].filter(period => availability.every(item => item.periods.has(period))).sort().reverse();
-  if (!shared.length) throw new Error(`fundamental coverage failed: ${required.length} 檔非ETF沒有共同完整8季EPS期末`);
-  return shared[0];
+  const candidates = [...new Set(availability.flatMap(item => [...item.periods]))].map(periodEnd => ({
+    periodEnd,
+    includedCodes: availability.filter(item => item.periods.has(periodEnd)).map(item => item.code)
+  })).sort((a, b) => b.includedCodes.length - a.includedCodes.length || b.periodEnd.localeCompare(a.periodEnd));
+  if (!candidates.length || candidates[0].includedCodes.length === 0) throw new Error('no analyzable fundamental samples');
+  const best = candidates[0];
+  const includedCodes = new Set(best.includedCodes);
+  return {
+    periodEnd: best.periodEnd,
+    includedCodes,
+    excludedCodes: availability.filter(item => !includedCodes.has(item.code)).map(item => item.code)
+  };
 }
 
 // This is intentionally the same EPS/AK definition as index.html computeJS:
@@ -373,20 +449,20 @@ function commonLatestPeriod(required, statementsByCode) {
 export function buildFundamentalsCandidate(stocks, rowsByCode, asOf) {
   const required = stocks.filter(stock => stock.type !== 'etf');
   const statementsByCode = new Map(required.map(stock => {
-    const code = String(stock.code || '').padStart(4, '0');
-    return [code, statementIndex(rowsByCode.get(code) || [])];
+    const code = normalizedCode(stock);
+    return [code, statementIndex(rowsByCode.get(code) || [], code)];
   }));
-  const periodEnd = commonLatestPeriod(required, statementsByCode);
+  const selection = commonLatestPeriod(required, statementsByCode);
+  const { periodEnd, includedCodes, excludedCodes } = selection;
   const periods = quarterEndsEndingAt(periodEnd);
   const latest4Periods = periods.slice(-4);
   const prior4Periods = periods.slice(0, 4);
-  const missing = [];
   const updated = stocks.map(stock => {
-    if (stock.type === 'etf') return stock; // Existing system has no EPS/AK for ETF.
-    const code = String(stock.code || '').padStart(4, '0');
+    if (stock.type === 'etf') return { ...stock, dataStatus: dataStatus(stock, { fundamentals: 'na', medAK: 'na' }) };
+    const code = normalizedCode(stock);
+    if (!includedCodes.has(code)) return { ...stock, dataStatus: dataStatus(stock, { fundamentals: 'missing', medAK: 'missing' }) };
     const statements = statementsByCode.get(code);
     const eps = valuesByPeriod(statements, 'EPS');
-    if (periods.some(period => !eps.values.has(period) || eps.conflicts.has(period))) { missing.push(`${stock.name || code}(${code || '無代號'}): 共同期EPS不完整`); return stock; }
     const prior = prior4Periods.reduce((sum, period) => sum + eps.values.get(period), 0);
     const current = latest4Periods.reduce((sum, period) => sum + eps.values.get(period), 0);
     const ak = prior > 0 ? +(current / prior - 1).toFixed(4) : null;
@@ -400,7 +476,8 @@ export function buildFundamentalsCandidate(stocks, rowsByCode, asOf) {
       q2: +eps.values.get(latest4Periods[1]).toFixed(2), q2Period: quarterLabel(latest4Periods[1]),
       q3: +eps.values.get(latest4Periods[2]).toFixed(2), q3Period: quarterLabel(latest4Periods[2]),
       q4: +eps.values.get(latest4Periods[3]).toFixed(2), q4Period: quarterLabel(latest4Periods[3]),
-      AK: ak
+      AK: ak,
+      dataStatus: dataStatus(stock, { fundamentals: 'ok', medAK: ak == null ? 'missing' : 'ok' })
     };
     const income = valuesByPeriod(statements, 'IncomeAfterTaxes');
     const revenue = valuesByPeriod(statements, 'Revenue');
@@ -416,12 +493,25 @@ export function buildFundamentalsCandidate(stocks, rowsByCode, asOf) {
     }
     return next;
   });
-  if (missing.length) throw new Error(`fundamental coverage failed (${missing.length}/${stocks.length}): ${missing.join(', ')}`);
   const validUntil = validUntilFor(periodEnd);
   if (!validUntil) throw new Error(`invalid financial period ${periodEnd}`);
-  const medAK = median(updated.map(stock => num(stock.AK)));
+  const medAKValues = updated.filter(stock => !stock.dataStatus?.excludedFrom?.includes('medAK')).map(stock => num(stock.AK));
+  const medAK = median(medAKValues);
   if (medAK == null) throw new Error('EPS growth median missing after validation');
-  return { updated, medAK: +medAK.toFixed(4), periodEnd, validUntil };
+  const medAKSampleSize = medAKValues.filter(Number.isFinite).length;
+  return {
+    updated,
+    medAK: +medAK.toFixed(4),
+    medAKSample: medAKSampleSize,
+    medAKSampleSize,
+    periodEnd,
+    validUntil,
+    covered: includedCodes.size,
+    fundamentalsCovered: includedCodes.size,
+    eligible: required.length,
+    excludedCodes,
+    notApplicableCodes: stocks.filter(stock => stock.type === 'etf').map(normalizedCode)
+  };
 }
 
 export async function atomicWriteJson(file, value, options = {}) {
@@ -453,13 +543,17 @@ async function main() {
   const [indexText, morningText] = await Promise.all([fs.readFile(INDEX_FILE, 'utf8'), fs.readFile(MORNING_FILE, 'utf8')]);
   const data = parseEmbeddedJson(indexText, 'DEFAULT_DATA');
   const brief = parseBrief(morningText);
+  validateUniverse(data.value);
   let existingSnapshot = null;
   try {
     const candidate = JSON.parse(await fs.readFile(SNAPSHOT_FILE, 'utf8'));
-    if (candidate?.schemaVersion === 1 && Array.isArray(candidate.stocks) && candidate.stocks.length === data.value.length) existingSnapshot = candidate;
+    if (candidate?.schemaVersion === 1 && Array.isArray(candidate.stocks)) {
+      validateUniverse(candidate.stocks);
+      existingSnapshot = candidate;
+    }
     else throw new Error('schema or stock count mismatch');
   } catch (error) {
-    if (error.code !== 'ENOENT') console.warn(`Ignoring invalid canonical snapshot: ${error.message}`);
+    if (error.code !== 'ENOENT') throw new Error(`invalid canonical snapshot: ${error.message}`);
   }
   let stocks = existingSnapshot?.stocks || data.value;
   let priceMeta = existingSnapshot?.price || brief.value.sourceMeta?.stockPool?.price;
@@ -468,30 +562,60 @@ async function main() {
   if (target === 'price' || target === 'both') {
     const priceResult = await pricesWithFallback(stocks, requestedDate);
     const candidate = buildCandidate(stocks, priceResult.prices, requestedDate, priceResult.fallbackDates);
+    if (candidate.covered !== stocks.length || candidate.excludedCodes.length !== 0) {
+      throw new Error(`price coverage gate failed (${candidate.covered}/${stocks.length}); refusing to write snapshot`);
+    }
     stocks = candidate.updated;
     const fallbackUsed = priceResult.fallbackCodes.length > 0;
     priceMeta = {
       source: fallbackUsed ? 'TWSE／TPEx 官方日收盤資料；缺檔由 FinMind TaiwanStockPrice 補齊' : 'TWSE／TPEx 官方日收盤資料',
       asOf: requestedDate,
       fetchedAt: new Date().toISOString(),
-      coverage: `${stocks.length}/${stocks.length}`,
-      officialCoverage: `${stocks.length - priceResult.fallbackCodes.length}/${stocks.length}`,
+      coverage: `${candidate.covered}/${stocks.length}`,
+      priceCoverage: `${candidate.priceCovered}/${stocks.length}`,
+      officialCoverage: `${candidate.covered - priceResult.fallbackCodes.length}/${stocks.length}`,
       fallbackCoverage: `${priceResult.fallbackCodes.length}/${stocks.length}`,
       fallbackCodes: priceResult.fallbackCodes,
       fallbackAsOf: Object.fromEntries(priceResult.fallbackDates),
+      excludedCodes: candidate.excludedCodes,
+      failures: priceResult.failures,
       officialErrors: priceResult.officialErrors,
       medCheap: candidate.medCheap,
-      method: '舊便宜度 × 舊收盤價 ÷ 新收盤價（股利／EPS未更新）'
+      medCheapSample: candidate.medCheapSample,
+      cheapSampleSize: candidate.cheapSampleSize,
+      method: '依當日收盤價重算股利率與便宜度；僅在 59/59 價格完整覆蓋時寫入'
     };
   }
   if (target === 'fundamentals' || target === 'both') {
     const rowsByCode = new Map();
     const required = stocks.filter(stock => stock.type !== 'etf');
     const queue = [...required];
-    await Promise.all(Array.from({ length: 3 }, async () => { while (queue.length) { const stock = queue.shift(); rowsByCode.set(String(stock.code).padStart(4, '0'), await finMindFundamentals(String(stock.code))); } }));
+    const failures = [];
+    await Promise.all(Array.from({ length: 3 }, async () => {
+      while (queue.length) {
+        const stock = queue.shift();
+        const code = String(stock.code).padStart(4, '0');
+        try { rowsByCode.set(code, await finMindFundamentals(code)); }
+        catch (error) { rowsByCode.set(code, []); failures.push(`${code}: ${error.message}`); }
+      }
+    }));
     const candidate = buildFundamentalsCandidate(stocks, rowsByCode, requestedDate);
     stocks = candidate.updated;
-    fundamentals = { source: 'FinMind TaiwanStockFinancialStatements', asOf: requestedDate, periodEnd: candidate.periodEnd, validUntil: candidate.validUntil, coverage: `${required.length}/${required.length}`, medAK: candidate.medAK, method: '近4季 EPS 合計 ÷ 前4季 EPS 合計 − 1（前4季合計≤0則不納入中位數）' };
+    fundamentals = {
+      source: 'FinMind TaiwanStockFinancialStatements',
+      asOf: requestedDate,
+      periodEnd: candidate.periodEnd,
+      validUntil: candidate.validUntil,
+      coverage: `${candidate.covered}/${candidate.eligible}`,
+      fundamentalsCoverage: `${candidate.fundamentalsCovered}/${candidate.eligible}`,
+      excludedCodes: candidate.excludedCodes,
+      notApplicableCodes: candidate.notApplicableCodes,
+      failures,
+      medAK: candidate.medAK,
+      medAKSample: candidate.medAKSample,
+      medAKSampleSize: candidate.medAKSampleSize,
+      method: '近4季 EPS 合計 ÷ 前4季 EPS 合計 − 1；缺少完整8季者不納入中位數、評分與訊號（前4季合計≤0不納入中位數）'
+    };
   }
   const snapshot = {
     schemaVersion: 1,
@@ -502,8 +626,8 @@ async function main() {
   };
   if (dryRun) {
     console.log(`DRY RUN OK: target=${target}, stocks=${stocks.length}, date=${requestedDate}`);
-    if (target === 'price' || target === 'both') console.log(`PRICE: coverage=${priceMeta.coverage}, medCheap=${priceMeta.medCheap}`);
-    if (target === 'fundamentals' || target === 'both') console.log(`FUNDAMENTALS: coverage=${fundamentals.coverage}, periodEnd=${fundamentals.periodEnd}, validUntil=${fundamentals.validUntil}, medAK=${fundamentals.medAK}`);
+    if (target === 'price' || target === 'both') console.log(`PRICE: coverage=${priceMeta.coverage}, cheapSampleSize=${priceMeta.cheapSampleSize}, medCheap=${priceMeta.medCheap}`);
+    if (target === 'fundamentals' || target === 'both') console.log(`FUNDAMENTALS: coverage=${fundamentals.coverage}, medAKSampleSize=${fundamentals.medAKSampleSize}, periodEnd=${fundamentals.periodEnd}, validUntil=${fundamentals.validUntil}, medAK=${fundamentals.medAK}`);
     console.log('No files were changed. Re-run with --write only after reviewing this output.');
     return;
   }
@@ -512,13 +636,18 @@ async function main() {
 }
 
 function selfTest() {
-  const stocks = [{ name: '甲', code: '0001', J: 100, cheap: 1 }, { name: '乙', code: '0002', J: 200, cheap: 0.5 }];
+  const stocks = [
+    { name: '甲', code: '0001', J: 100, divEarn1: 8, div1: 8, avgYld5: 0.1 },
+    { name: '乙', code: '0002', J: 200, divEarn1: 10, div1: 10, avgYld5: 0.1 }
+  ];
   const ok = buildCandidate(stocks, new Map([['0001', 80], ['0002', 250]]), '2026-07-29');
-  if (ok.updated[0].cheap !== 1.25 || ok.updated[1].cheap !== 0.4 || ok.medCheap !== 1.25) throw new Error('price-only cheapness calculation test failed');
+  if (ok.updated[0].cheap !== 1 || ok.updated[1].cheap !== 0.4 || ok.medCheap !== 1) throw new Error('price/yield/cheapness calculation test failed');
   let rejected = false;
-  try { buildCandidate(stocks, new Map([['0001', 80]]), '2026-07-29'); } catch { rejected = true; }
-  if (!rejected) throw new Error('partial coverage must fail');
-  console.log('SELF-TEST OK: proportional cheapness, median, and partial-coverage rejection');
+  try { buildCandidate(stocks, new Map([['0001', 80]]), '2026-07-29'); } catch (error) {
+    rejected = /coverage\/validation failed \(1\/2\)/.test(error.message);
+  }
+  if (!rejected) throw new Error('partial price coverage must fail');
+  console.log('SELF-TEST OK: recomputation, full-coverage gate, and partial-coverage rejection');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
