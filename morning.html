@@ -82,7 +82,10 @@ footer{margin-top:36px;font-size:11.5px;color:var(--sub);line-height:1.7;border-
 </header>
 
 <div class="headline" id="headline"><span class="tag">本頁摘要</span><div class="headline-main"><div class="headline-score neutral" id="headscore" hidden></div><div class="headline-copy"><span id="headtxt"></span><div class="headline-meta" id="headmeta"></div></div></div></div>
-<div id="livestat" style="font-size:11.5px;color:var(--sub);margin:-16px 0 18px;padding:0 4px"></div>
+<div style="display:flex;align-items:center;gap:10px;margin:-16px 0 18px;padding:0 4px">
+<button id="refreshbtn" onclick="refreshLive()" style="font-size:12.5px;padding:5px 14px;border-radius:8px;border:1px solid var(--line,#ccc);background:var(--card,#fff);color:var(--ink,#222);cursor:pointer;white-space:nowrap">🔄 立即更新</button>
+<div id="livestat" style="font-size:11.5px;color:var(--sub)"></div>
+</div>
 
 <div id="alerts"></div>
 
@@ -106,7 +109,7 @@ footer{margin-top:36px;font-size:11.5px;color:var(--sub);line-height:1.7;border-
 <h2>近期晨報</h2>
 <div class="hist" id="hist"></div>
 
-<footer>本頁呈現最新已發布的晨報快照；自動快照排程尚未啟用。所有數字來自公開資料（FinMind、CoinGecko 與每日快照）；每項數字均標示資料來源與資料截至日。預測以情境與觸發條件表達，不構成投資建議；暫無資料不納入命中判定。
+<footer>本頁開啟或按「🔄 立即更新」時，即時重抓：台股指數／趨勢燈／市場溫度、融資、美元台幣、美股三指數、VIX、比特幣與以太幣（FinMind、CoinGecko，免金鑰不耗 AI 額度）。日經、美債殖利率、美元指數、黃金與期貨為最後晨報快照；七人評論、預測簿與判定為最後一次晨報編輯內容，需 Claude 重跑晨報才會更新。每項數字均標示資料來源與資料截至日。預測以情境與觸發條件表達，不構成投資建議；暫無資料不納入命中判定。
 <br><br>頭像：Munger © Nick（CC BY 2.0）、Dalio © Web Summit（CC BY 2.0）、Marks © kellywritershouse（CC BY 2.0）、Kostolany © Bennys Buidl Fabrik（CC BY-SA 4.0）、Buffett（U.S. ITA）與 Graham 為公共領域；以上為 Wikimedia Commons 授權照片之素描化衍生作品。彼得・林區為使用者提供之素描肖像。</footer>
 </div>
 
@@ -383,6 +386,16 @@ function normalizeFx(rows){
   });
   return out.length>=6?out.sort(function(a,b){return a.date.localeCompare(b.date);}):null;
 }
+function normalizeUS(rows){
+  const out=[];
+  rows.forEach(function(r){const close=numberOrNull(r.Close);if(validDate(r.date)&&hasNum(close)&&close>0)out.push({date:r.date,close:close});});
+  return out.length>=2?out.sort(function(a,b){return a.date.localeCompare(b.date);}):null;
+}
+function usQuote(result){
+  if(!result||!result.data)return {last:null,d1:null,meta:result?result.meta:null};
+  const d=result.data;
+  return {last:d[d.length-1].close,d1:d[d.length-1].close/d[d.length-2].close-1,meta:result.meta};
+}
 function normalizeTradingDates(rows){
   const seen={};
   rows.forEach(function(r){if(r&&validDate(r.date))seen[r.date]=true;});
@@ -548,7 +561,7 @@ function snapshotTemperature(){
   const score=item&&numberOrNull(item.value);
   return hasNum(score)?{score:score,zone:(item.sub||'').split('；')[0]}:null;
 }
-function buildMerged(L,meta,stock){
+function buildMerged(L,meta,stock,us){
   const indexReady=meta.index.state!=='unavailable'&&hasNum(L.idx),marginReady=meta.margin.state!=='unavailable'&&hasNum(L.marPeak),fxReady=meta.fx.state!=='unavailable'&&hasNum(L.fx),cryptoReady=meta.crypto.state!=='unavailable'&&hasNum(L.btc)&&hasNum(L.eth);
   const indexMeta=displayMeta(meta.index,STATIC_META.taiwan),marginMeta=displayMeta(meta.margin,STATIC_META.margin),fxMeta=displayMeta(meta.fx,STATIC_META.fx);
   const stockItems=indexReady?[
@@ -571,8 +584,21 @@ function buildMerged(L,meta,stock){
   }
   moneyItems.push(fxReady?makeTile('美元／台幣',L.fx.toFixed(3),'5日 '+pcs(L.fx5),L.fx5>0.005?'warn':'ok'):fallbackTile('資金面','美元/台幣'));
   const moneyGroup={name:'資金面',items:moneyItems,note:'融資：'+metaShort(marginMeta)+'；美元／台幣：'+metaShort(fxMeta)};
-  const globalGroup=cloneGroup(snapGroup('全球股市'),'全球股市（每日快照）',STATIC_META.global);
-  const riskGroup=cloneGroup(snapGroup('利率'),'利率與風險（每日快照）',STATIC_META.risk);
+  const usReady=function(q){return q&&hasNum(q.last)&&hasNum(q.d1)&&q.meta&&q.meta.state!=='unavailable';};
+  const globalGroup=cloneGroup(snapGroup('全球股市'),'全球股市（美股即時抓取；日經為快照）',STATIC_META.global);
+  const US_MAP={'S&P 500':us&&us.spx,'那斯達克':us&&us.ndq,'費城半導體':us&&us.sox};
+  globalGroup.items=globalGroup.items.map(function(item){
+    const q=US_MAP[item.label];
+    if(usReady(q))return makeTile(item.label,fmt(q.last,0),pcs(q.d1)+'（資料至 '+q.meta.asOf+'）',q.d1>=0?'ok':(q.d1<-0.02?'bad':'warn'));
+    return item;
+  });
+  if(us&&usReady(us.spx))globalGroup.note='美股三指數：FinMind（資料至 '+us.spx.meta.asOf+'）；日經：'+metaShort(STATIC_META.global);
+  const riskGroup=cloneGroup(snapGroup('利率'),'利率與風險（VIX 即時抓取；其餘快照）',STATIC_META.risk);
+  riskGroup.items=riskGroup.items.map(function(item){
+    if(item.label.indexOf('VIX')>=0&&us&&usReady(us.vix))return makeTile(item.label,us.vix.last.toFixed(2),'資料至 '+us.vix.meta.asOf,us.vix.last<20?'ok':(us.vix.last<30?'warn':'bad'));
+    return item;
+  });
+  if(us&&usReady(us.vix))riskGroup.note='VIX：FinMind（資料至 '+us.vix.meta.asOf+'）；美10年債／美元指數：'+metaShort(STATIC_META.risk);
   const preGroup=cloneGroup(snapGroup('盤前'),'盤前風向（快照＋加密資料）',STATIC_META.pre);
   preGroup.items=preGroup.items.map(function(item){
     if(item.label.indexOf('比特幣')>=0&&cryptoReady)return makeTile(item.label,fmt(L.btc,0),pcs(L.btcC),L.btcC>=0?'ok':(L.btcC<-0.03?'bad':'warn'));
@@ -602,20 +628,32 @@ function startDate(days){return taipeiDate(Date.now()-days*86400000);}
 function initialMeta(source){return unavailableMeta(source,null,null);}
 async function refreshLive(){
   const st=document.getElementById('livestat');
+  const btn=document.getElementById('refreshbtn');
+  if(btn&&btn.disabled)return;
+  if(btn){btn.disabled=true;btn.textContent='⟳ 更新中…';}
   st.textContent='⟳ 正在讀取各來源；失敗項目會各自標示，其他資料照常保留。';
+  try{
   const result=await Promise.all([
     fm('TaiwanStockTotalReturnIndex','TAIEX',startDate(365*5+30),normalizeIndex),
     fm('TaiwanStockTotalMarginPurchaseShortSale',null,startDate(400),normalizeMargin),
     fm('TaiwanExchangeRate','USD',startDate(30),normalizeFx),
     coinGecko(),
     // 單一台股交易日日曆請求：只用來校正股票池快照年齡，絕不逐檔請求 59 檔價格。
-    fm('TaiwanStockTradingDate',null,STOCK_POOL.priceMeta.asOf||startDate(400),normalizeTradingDates)
+    fm('TaiwanStockTradingDate',null,STOCK_POOL.priceMeta.asOf||startDate(400),normalizeTradingDates),
+    fm('USStockPrice','^GSPC',startDate(14),normalizeUS),
+    fm('USStockPrice','^IXIC',startDate(14),normalizeUS),
+    fm('USStockPrice','^SOX',startDate(14),normalizeUS),
+    fm('USStockPrice','^VIX',startDate(14),normalizeUS)
   ]);
   const meta={index:result[0].meta,margin:result[1].meta,fx:result[2].meta,crypto:result[3].meta};
   const stock=stockPoolInfo(result[4]);
+  const us={spx:usQuote(result[5]),ndq:usQuote(result[6]),sox:usQuote(result[7]),vix:usQuote(result[8])};
   const L=computeMarket(result[0].data,result[1].data,result[2].data,result[3].data,stock,meta);
-  renderAll(buildMerged(L,meta,stock));
-  st.textContent=statusText();
+  renderAll(buildMerged(L,meta,stock,us));
+  st.textContent=statusText()+' 最後更新：'+taipeiTimestamp()+'（台北時間）';
+  }finally{
+  if(btn){btn.disabled=false;btn.textContent='🔄 立即更新';}
+  }
 }
 // 先以明確標示的快照呈現；讀取完成後只替換成功且驗證過的來源。
 const INITIAL_META={index:initialMeta('FinMind'),margin:initialMeta('FinMind'),fx:initialMeta('FinMind'),crypto:initialMeta('CoinGecko')};
