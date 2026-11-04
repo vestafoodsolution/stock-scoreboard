@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { FIXED_STOCK_CODES, assertPriceDateReady, atomicWriteJson, buildCandidate, buildFundamentalsCandidate, finMindFundamentals, finMindPrice, officialPriceUrls, pricesWithFallback, rowMap, validateUniverse } from '../scripts/update-stock-pool.mjs';
+import { CORPORATE_ACTIONS, FIXED_STOCK_CODES, adjustStoredPerShare, assertPriceDateReady, atomicWriteJson, buildCandidate, buildFundamentalsCandidate, cheapSummary, finMindFundamentals, finMindPrice, officialPriceUrls, pricesWithFallback, rowMap, validateUniverse } from '../scripts/update-stock-pool.mjs';
 
 const fixture = JSON.parse(await fs.readFile(new URL('./fixtures/twse-closing-sample.json', import.meta.url), 'utf8'));
 const fundamentalFixture = JSON.parse(await fs.readFile(new URL('./fixtures/fundamentals-common-period.json', import.meta.url), 'utf8'));
@@ -341,3 +341,70 @@ assert.match(updaterScript, /medAKSampleSize/);
 assert.doesNotMatch(updaterScript, /MIN_ANALYSIS_COVERAGE|minimumCoverage|minimum-coverage gate/);
 assert.doesNotMatch(updaterScript, /Ignoring invalid canonical snapshot/);
 console.log('FIXTURE TEST OK: official price parsing, exact-day FinMind fallback, 59/59 price gate, fundamental coverage, zero-sample rejection, coverage/sample disclosure, common-period selection, corporate actions, fixed-roster validation, safe retries, atomic replacement, and UI policy');
+
+// 2026 面額／股數變更：寶雅 1→10 股、緯穎 1→2.9827946 股。快照沿用的股利與
+// 四季 EPS 只能除一次，殖利率與便宜度必須用新基準算。
+const corporateFixture = JSON.parse(await fs.readFile(new URL('./fixtures/corporate-actions-2026.json', import.meta.url), 'utf8'));
+const [poyaBefore, wiwynnBefore] = corporateFixture.stocks;
+assert.equal(CORPORATE_ACTIONS['5904'][0].factor, 10);
+assert.equal(CORPORATE_ACTIONS['6669'][0].factor, 2.9827946);
+const poya = buildCandidate([poyaBefore], new Map(Object.entries(corporateFixture.closes['2026-11-03'])), '2026-11-03').updated[0];
+assert.equal(poya.div1, 2.3);
+assert.equal(poya.divEarn1, 2.3);
+assert.equal(poya.div5, 2.462);
+assert.deepEqual([poya.q1, poya.q2, poya.q3, poya.q4], [0.76, 0.9, 0.93, 0.82]);
+assert.equal(poya.divYldAll, 0.0316, '寶雅 殖利率須以 1/10 股利對新收盤價');
+assert.equal(poya.cheap, 0.534, '寶雅 便宜度不得再是分割前基準的 4.45');
+assert.equal(poya.perShareBasis, '2026-11-03');
+assert.equal(poya.avgYld5, 0.0593, '五年平均殖利率是比率，不受股數變更影響');
+const wiwynn = buildCandidate([wiwynnBefore], new Map(Object.entries(corporateFixture.closes['2026-09-02'])), '2026-09-02').updated[0];
+assert.equal(wiwynn.div1, 48.408);
+assert.equal(wiwynn.div5, 24.634);
+assert.equal(wiwynn.q4, 26.96);
+assert.equal(wiwynn.divYldAll, 0.0185);
+assert.equal(wiwynn.cheap, 0.394, '緯穎 除權日便宜度須以 1/2.9827946 股利計算');
+const wiwynnDayBefore = buildCandidate([wiwynnBefore], new Map(Object.entries(corporateFixture.closes['2026-09-01'])), '2026-09-01').updated[0];
+assert.equal(wiwynnDayBefore.div1, 144.392, '除權前一日仍是舊基準，不得提前調整');
+assert.equal(wiwynnDayBefore.perShareBasis, undefined);
+assert.equal(adjustStoredPerShare(poyaBefore, '2026-08-09').div1, 23, '新股買賣日前不得調整');
+const adjustedTwice = buildCandidate([poya, wiwynn], new Map([['5904', 72.7], ['6669', 2610]]), '2026-11-04').updated;
+assert.equal(adjustedTwice[0].div1, 2.3, '再跑一次日更不得重複除以 10');
+assert.equal(adjustedTwice[1].div1, 48.408, '再跑一次日更不得重複除以 2.9827946');
+assert.equal(adjustedTwice[0].cheap, 0.534);
+assert.equal(adjustStoredPerShare({ code: '2327', div1: 5.999, div5: 15.229 }, '2026-11-03').div1, 5.999, '國巨 2025-08-25 已在既有資料反映，不得再除以 4');
+assert.equal(adjustStoredPerShare({ code: '2330', div1: 22 }, '2026-11-03').div1, 22, '無事件的公司原樣不動');
+
+// 季更：除權前期末的 FinMind EPS 列除以 factor，除權後的季別不動；股利同時換基準並記下
+// perShareBasis，但快照收盤價仍是除權前時不改便宜度，留給下一次日更。
+const wiwynnRows = ['2024-12-31', '2025-03-31', '2025-06-30', '2025-09-30', '2025-12-31', '2026-03-31', '2026-06-30'].map(date => ({ date, type: 'EPS', value: 30 }));
+wiwynnRows.push({ date: '2026-09-30', type: 'EPS', value: 10 });
+const wiwynnQuarterly = buildFundamentalsCandidate([wiwynnBefore], new Map([['6669', wiwynnRows]]), '2026-11-14').updated[0];
+assert.equal(wiwynnQuarterly.q3, 10.06, '2026Q2 EPS 30 ÷ 2.9827946');
+assert.equal(wiwynnQuarterly.q4, 10, '2026Q3 已是除權後基準，不得再除');
+assert.equal(wiwynnQuarterly.q4Period, '2026Q3');
+assert.equal(wiwynnQuarterly.div1, 48.408, '季更也要把股利換到新基準');
+assert.equal(wiwynnQuarterly.perShareBasis, '2026-11-14');
+assert.equal(wiwynnQuarterly.cheap, 0.517, '快照收盤 2026-08-11 仍是除權前價格，便宜度留給日更重算');
+const wiwynnAfterBoth = buildCandidate([wiwynnQuarterly], new Map([['6669', 2610]]), '2026-11-14').updated[0];
+assert.equal(wiwynnAfterBoth.div1, 48.408, '季更之後的日更不得再除一次');
+assert.equal(wiwynnAfterBoth.cheap, 0.394);
+assert.equal(wiwynnAfterBoth.q3, 10.06, '日更不得改動季更已換基準的 EPS');
+
+// 審查補測：q1–q4 只除期末早於生效日的季別；已是新基準的 2026Q3 不得再除。
+const wiwynnWithQ3 = { ...wiwynnBefore, q1: 74.21, q1Period: '2025Q4', q2: 75.95, q2Period: '2026Q1', q3: 80.43, q3Period: '2026Q2', q4: 27.5, q4Period: '2026Q3' };
+const wiwynnMixed = buildCandidate([wiwynnWithQ3], new Map([['6669', 1770]]), '2026-11-20').updated[0];
+assert.deepEqual([wiwynnMixed.q1, wiwynnMixed.q2, wiwynnMixed.q3, wiwynnMixed.q4], [24.88, 25.46, 26.96, 27.5], '2026Q3 EPS 已是除權後基準，日更只能除前三季');
+assert.equal(wiwynnMixed.div1, 48.408);
+const unlabeled = adjustStoredPerShare({ code: '5904', div1: 23, q4: 8.15 }, '2026-11-03');
+assert.equal(unlabeled.q4, 0.82, '沒有季別標籤時整批除');
+// 季更執行日早於生效日：FinMind EPS 列與股利都不得提前換基準。
+const earlyQuarterly = buildFundamentalsCandidate([wiwynnBefore], new Map([['6669', wiwynnRows.slice(0, 7).concat([{ date: '2026-09-30', type: 'EPS', value: 30 }])]]), '2026-08-20').updated[0];
+assert.equal(earlyQuarterly.q3, 30, '2026-08-20 執行時緯穎尚未除權，EPS 不得先除');
+assert.equal(earlyQuarterly.div1, 144.392);
+assert.equal(earlyQuarterly.perShareBasis, undefined);
+// perShareBasis 壞掉或回補更早日期：直接報錯，不得無聲重複除或新舊基準混用。
+assert.throws(() => adjustStoredPerShare({ code: '6669', div1: 48.408, perShareBasis: 'done' }, '2026-11-03'), /invalid perShareBasis for 6669/);
+assert.throws(() => adjustStoredPerShare({ code: '6669', div1: 48.408, perShareBasis: '2026-11-03' }, '2026-09-01'), /already on the 2026-11-03 basis/);
+assert.throws(() => buildCandidate([wiwynn], new Map([['6669', 7800]]), '2026-09-01'), /already on the 2026-09-02 basis/);
+assert.equal(adjustStoredPerShare({ code: '6669', div1: 48.408, perShareBasis: '2026-11-03' }, '2026-11-03').div1, 48.408, '同一天重跑可以');
+assert.deepEqual(cheapSummary([{ cheap: 0.5, divYldAll: 0.03 }, { cheap: 1.5, divYldAll: 0.02 }, { cheap: 0.7, divYldAll: 0.01 }, { cheap: 9, divYldAll: 0 }]), { medCheap: 0.7, cheapSampleSize: 3 }, '殖利率 0 的檔不進中位數樣本');

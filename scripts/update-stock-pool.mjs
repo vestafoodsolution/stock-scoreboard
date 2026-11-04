@@ -302,19 +302,16 @@ export async function pricesWithFallback(stocks, date, options = {}) {
 
 export function buildCandidate(stocks, prices, asOf, priceDates = new Map()) {
   const excludedCodes = [];
-  const updated = stocks.map(stock => {
-    const code = normalizedCode(stock);
+  const updated = stocks.map(original => {
+    const code = normalizedCode(original);
     const close = prices.get(code);
     if (!code || close == null || close <= 0) {
-      excludedCodes.push(code || String(stock.code ?? ''));
-      return { ...stock, dataStatus: dataStatus(stock, { price: 'missing', cheap: 'missing' }) };
+      excludedCodes.push(code || String(original.code ?? ''));
+      return { ...original, dataStatus: dataStatus(original, { price: 'missing', cheap: 'missing' }) };
     }
-    const divEarn = num(stock.divEarn1);
-    const divAll = num(stock.div1);
-    const averageYield = num(stock.avgYld5);
-    const divYldEarn = divEarn == null ? null : +(divEarn / close).toFixed(4);
-    const divYldAll = divAll == null ? null : +(divAll / close).toFixed(4);
-    const cheap = divAll != null && averageYield > 0 ? +((divAll / close) / averageYield).toFixed(3) : null;
+    // 收盤價是生效後的新基準，股利也要先換到同一基準再算殖利率與便宜度。
+    const stock = adjustStoredPerShare(original, asOf);
+    const { divYldEarn, divYldAll, cheap } = yieldFields(stock, close);
     return {
       ...stock,
       J: close,
@@ -330,21 +327,25 @@ export function buildCandidate(stocks, prices, asOf, priceDates = new Map()) {
     const labels = excludedCodes.join(', ');
     throw new Error(`coverage/validation failed (${covered}/${stocks.length}): ${labels}`);
   }
-  const medCheapValues = updated
-    .filter(stock => !stock.dataStatus?.excludedFrom?.includes('medCheap') && num(stock.divYldAll) > 0)
-    .map(stock => num(stock.cheap));
-  const medCheap = median(medCheapValues);
+  const { medCheap, cheapSampleSize } = cheapSummary(updated);
   if (medCheap == null) throw new Error('median cheapness missing after validation');
-  const cheapSampleSize = medCheapValues.filter(Number.isFinite).length;
   return {
     updated,
-    medCheap: +medCheap.toFixed(3),
+    medCheap,
     covered,
     priceCovered: covered,
     cheapSampleSize,
     medCheapSample: cheapSampleSize,
     excludedCodes
   };
+}
+
+export function cheapSummary(stocks) {
+  const values = stocks
+    .filter(stock => !stock.dataStatus?.excludedFrom?.includes('medCheap') && num(stock.divYldAll) > 0)
+    .map(stock => num(stock.cheap));
+  const medCheap = median(values);
+  return { medCheap: medCheap == null ? null : +medCheap.toFixed(3), cheapSampleSize: values.filter(Number.isFinite).length };
 }
 
 function validUntilFor(periodEnd) {
@@ -360,19 +361,96 @@ function validUntilFor(periodEnd) {
   return null;
 }
 
-const CORPORATE_ACTIONS = {
-  // 國巨 2025-08-25 股票面額由 10 元變更為 2.5 元；變更前每股數字需除以 4
-  // 才能與變更後 EPS 放在同一個每股基準比較。
-  '2327': [{ effectiveDate: '2025-08-25', factor: 4 }]
-};
+// 面額／股數變更（分割、面額變更、大額股票股利）：生效日前的每股數字需除以
+// factor，才能與生效後的收盤價、EPS 放在同一個每股基準比較。
+// factor 一律取自官方公告的換股率或配股率，不用前後收盤價反推。
+export const CORPORATE_ACTIONS = Object.freeze({
+  // 國巨 2025-08-25 股票面額由 10 元變更為 2.5 元；每 1 股換發 4 股。
+  '2327': [{ effectiveDate: '2025-08-25', factor: 4 }],
+  // 寶雅 股票面額由 10 元變更為 1 元，每 1 股換發 10 股（流通股數 106,443,826 →
+  // 1,064,438,260）。舊股最後交易日 2026-07-29，新股 2026-08-10 起恢復上櫃買賣。
+  // 來源：公開資訊觀測站 2026-07-02 重大訊息「股票面額變更之換股作業計畫」；
+  // 櫃買中心 115.06.24 證櫃監字第 1150004034 號函。
+  '5904': [{ effectiveDate: '2026-08-10', factor: 10 }],
+  // 緯穎 2025 年度盈餘轉增資，股票股利依可轉債轉換後實際股數調整為每千股配發
+  // 1,982.7946 股（原 2026-08-07 公告 1,984.22578 股），2026-09-02 除權：
+  // 每 1 舊股變 2.9827946 股。證交所除權除息計算結果表：除權前收盤 7,800、
+  // 除權參考價 2,614.99（≈ 7,800 ÷ 2.9827946），每千股無償配股 1,982.8 股。
+  '6669': [{ effectiveDate: '2026-09-02', factor: 2.9827946 }]
+});
 
-function corporateActionFactor(code, periodEnd) {
-  return (CORPORATE_ACTIONS[code] || []).reduce((factor, action) => (
-    periodEnd < action.effectiveDate ? factor * action.factor : factor
-  ), 1);
+// 快照裡的股利（近一年、五年平均）不是每次重抓，而是從 index.html DEFAULT_DATA
+// 一路帶下來，基準日就是 DEFAULT_DATA 的價格日；之後才生效的事件要在第一次
+// 日更或季更時除以 factor 一次，並用 perShareBasis 記下已換算到哪一天，避免
+// 重複除。四季 EPS 由季更從 FinMind 原始列重寫，基準跟著各季財報走：只有
+// 期末早於生效日的那幾季（q{n}Period 標籤）才需要除；沒有標籤時才整批除。
+export const STORED_PER_SHARE_BASELINE = '2026-07-17';
+const STORED_DIVIDEND_FIELDS = Object.freeze(['div1', 'divEarn1', 'div5']);
+const STORED_EPS_FIELDS = Object.freeze(['q1', 'q2', 'q3', 'q4']);
+
+function actionsEffectiveBy(code, asOf) {
+  // 已公告但尚未生效的事件不得提前套用，否則回補舊日期時會把舊基準價格
+  // 配上新基準股利或 EPS。
+  return (CORPORATE_ACTIONS[code] || []).filter(action => action.effectiveDate <= asOf);
 }
 
-function statementIndex(rows, code) {
+function factorBefore(actions, periodEnd) {
+  return actions.reduce((factor, action) => (periodEnd < action.effectiveDate ? factor * action.factor : factor), 1);
+}
+
+function corporateActionFactor(code, periodEnd, asOf) {
+  return factorBefore(actionsEffectiveBy(code, asOf), periodEnd);
+}
+
+function quarterLabelEnd(label) {
+  const match = String(label || '').match(/^(\d{4})Q([1-4])$/);
+  return match ? `${match[1]}-${['03-31', '06-30', '09-30', '12-31'][Number(match[2]) - 1]}` : null;
+}
+
+function yieldFields(stock, close) {
+  const divEarn = num(stock.divEarn1);
+  const divAll = num(stock.div1);
+  const averageYield = num(stock.avgYld5);
+  return {
+    divYldEarn: divEarn == null ? null : +(divEarn / close).toFixed(4),
+    divYldAll: divAll == null ? null : +(divAll / close).toFixed(4),
+    cheap: divAll != null && averageYield > 0 ? +((divAll / close) / averageYield).toFixed(3) : null
+  };
+}
+
+export function adjustStoredPerShare(stock, asOf) {
+  const code = normalizedCode(stock);
+  let basis = STORED_PER_SHARE_BASELINE;
+  if (stock.perShareBasis != null) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(stock.perShareBasis)) throw new Error(`invalid perShareBasis for ${code}: ${JSON.stringify(stock.perShareBasis)}`);
+    basis = stock.perShareBasis;
+    // 每股數字已換到 basis 基準，不能再用更早日期的收盤價去配。
+    if (asOf < basis) throw new Error(`cannot rebuild ${code} for ${asOf}: per-share figures are already on the ${basis} basis`);
+  }
+  const pending = actionsEffectiveBy(code, asOf).filter(action => action.effectiveDate > basis);
+  if (!pending.length) return stock;
+  const factor = pending.reduce((product, action) => product * action.factor, 1);
+  const next = { ...stock, perShareBasis: asOf };
+  for (const key of STORED_DIVIDEND_FIELDS) {
+    const value = num(stock[key]);
+    if (value != null) next[key] = +(value / factor).toFixed(3);
+  }
+  for (const key of STORED_EPS_FIELDS) {
+    const value = num(stock[key]);
+    if (value == null) continue;
+    const periodEnd = quarterLabelEnd(stock[`${key}Period`]);
+    const epsFactor = periodEnd ? factorBefore(pending, periodEnd) : factor;
+    if (epsFactor !== 1) next[key] = +(value / epsFactor).toFixed(2);
+  }
+  // 快照裡的收盤價若已是生效後的價格，順手把股利率與便宜度換成新基準；
+  // 否則留給下一次日更用當日收盤重算。
+  const lastEffective = pending.map(action => action.effectiveDate).sort().at(-1);
+  const close = num(stock.J);
+  if (close > 0 && typeof stock.Jdate === 'string' && stock.Jdate >= lastEffective) Object.assign(next, yieldFields(next, close));
+  return next;
+}
+
+function statementIndex(rows, code, asOf) {
   const byType = new Map();
   const validRows = rows.filter(row => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && num(row.value) != null)
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -383,7 +461,7 @@ function statementIndex(rows, code) {
       byType.set(row.type, entry);
     }
     const rawValue = num(row.value);
-    const value = row.type === 'EPS' ? rawValue / corporateActionFactor(code, row.date) : rawValue;
+    const value = row.type === 'EPS' ? rawValue / corporateActionFactor(code, row.date, asOf) : rawValue;
     if (entry.values.has(row.date) && entry.values.get(row.date) !== value) entry.conflicts.add(row.date);
     entry.values.set(row.date, value);
   }
@@ -450,14 +528,17 @@ export function buildFundamentalsCandidate(stocks, rowsByCode, asOf) {
   const required = stocks.filter(stock => stock.type !== 'etf');
   const statementsByCode = new Map(required.map(stock => {
     const code = normalizedCode(stock);
-    return [code, statementIndex(rowsByCode.get(code) || [], code)];
+    return [code, statementIndex(rowsByCode.get(code) || [], code, asOf)];
   }));
   const selection = commonLatestPeriod(required, statementsByCode);
   const { periodEnd, includedCodes, excludedCodes } = selection;
   const periods = quarterEndsEndingAt(periodEnd);
   const latest4Periods = periods.slice(-4);
   const prior4Periods = periods.slice(0, 4);
-  const updated = stocks.map(stock => {
+  const updated = stocks.map(original => {
+    // 季更也套同一份面額／股數調整：股利先換到新基準並記下 perShareBasis，
+    // 之後的日更才不會再除一次；q1–q4 隨後由 FinMind 原始列重算覆蓋。
+    const stock = adjustStoredPerShare(original, asOf);
     if (stock.type === 'etf') return { ...stock, dataStatus: dataStatus(stock, { fundamentals: 'na', medAK: 'na' }) };
     const code = normalizedCode(stock);
     if (!includedCodes.has(code)) return { ...stock, dataStatus: dataStatus(stock, { fundamentals: 'missing', medAK: 'missing' }) };
@@ -616,6 +697,11 @@ async function main() {
       medAKSampleSize: candidate.medAKSampleSize,
       method: '近4季 EPS 合計 ÷ 前4季 EPS 合計 − 1；缺少完整8季者不納入中位數、評分與訊號（前4季合計≤0不納入中位數）'
     };
+    if (target === 'fundamentals' && priceMeta) {
+      // 面額／股數調整可能在季更時重算了個股便宜度，中繼資料的中位數要跟上。
+      const summary = cheapSummary(stocks);
+      if (summary.medCheap != null) priceMeta = { ...priceMeta, medCheap: summary.medCheap, medCheapSample: summary.cheapSampleSize, cheapSampleSize: summary.cheapSampleSize };
+    }
   }
   const snapshot = {
     schemaVersion: 1,
@@ -647,7 +733,15 @@ function selfTest() {
     rejected = /coverage\/validation failed \(1\/2\)/.test(error.message);
   }
   if (!rejected) throw new Error('partial price coverage must fail');
-  console.log('SELF-TEST OK: recomputation, full-coverage gate, and partial-coverage rejection');
+  // 面額／股數變更：生效前基準的股利除以 factor 一次，再跑一次不得重複除。
+  const split = { name: '丙', code: '5904', J: 720, Jdate: '2026-07-29', div1: 23, divEarn1: 23, div5: 24.62, avgYld5: 0.0593, q1: 7.59, q2: 8.98, q3: 9.3, q4: 8.15 };
+  const once = buildCandidate([split], new Map([['5904', 72.7]]), '2026-11-03').updated[0];
+  const twice = buildCandidate([once], new Map([['5904', 72.7]]), '2026-11-04').updated[0];
+  if (once.div1 !== 2.3 || once.div5 !== 2.462 || once.q4 !== 0.82 || once.cheap !== 0.534 || once.perShareBasis !== '2026-11-03') throw new Error('corporate action per-share adjustment test failed');
+  if (twice.div1 !== 2.3 || twice.cheap !== 0.534) throw new Error('corporate action adjustment must not be applied twice');
+  const yageo = buildCandidate([{ name: '丁', code: '2327', J: 617, Jdate: '2026-08-11', div1: 5.999, avgYld5: 0.0445 }], new Map([['2327', 617]]), '2026-11-03').updated[0];
+  if (yageo.div1 !== 5.999 || yageo.perShareBasis !== undefined) throw new Error('actions before the stored baseline must not be reapplied');
+  console.log('SELF-TEST OK: recomputation, full-coverage gate, partial-coverage rejection, and corporate-action basis adjustment');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
