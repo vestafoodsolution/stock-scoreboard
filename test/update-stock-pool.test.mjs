@@ -420,3 +420,11 @@ assert.throws(() => adjustStoredPerShare({ code: '6669', div1: 48.408, perShareB
 assert.throws(() => buildCandidate([wiwynn], new Map([['6669', 7800]]), '2026-09-01'), /already on the 2026-09-02 basis/);
 assert.equal(adjustStoredPerShare({ code: '6669', div1: 48.408, perShareBasis: '2026-11-03' }, '2026-11-03').div1, 48.408, '同一天重跑可以');
 assert.deepEqual(cheapSummary([{ cheap: 0.5, divYldAll: 0.03 }, { cheap: 1.5, divYldAll: 0.02 }, { cheap: 0.7, divYldAll: 0.01 }, { cheap: 9, divYldAll: 0 }]), { medCheap: 0.7, cheapSampleSize: 3 }, '殖利率 0 的檔不進中位數樣本');
+
+// 網頁「更新股價／完整更新」走 index.html 的 CORP_ACTIONS，更新器走 CORPORATE_ACTIONS；兩張表不一致時，
+// 同一檔在網頁與快照會出現不同基準的數字。
+const pageCorpMatch = indexHtml.match(/const CORP_ACTIONS=(\{[\s\S]*?\n\});/);
+assert.ok(pageCorpMatch, 'index.html 必須有 CORP_ACTIONS');
+const pageCorp = new Function(`return ${pageCorpMatch[1]};`)();
+const pairs = table => Object.entries(table).flatMap(([code, actions]) => actions.map(action => [code, action.date ?? action.effectiveDate, action.factor])).sort();
+assert.deepEqual(pairs(pageCorp), pairs(CORPORATE_ACTIONS), '網頁與更新器的面額／股數變更表必須相同');

@@ -695,7 +695,9 @@ const Dt=s=>{const d=new Date(s);return isNaN(d)?null:d;};
 // factor=股數倍數(1拆4→4);date 之前的每股數值(股價/EPS/每股股利)需 ÷factor 才與現值同基準。
 // 分割/合併:factor=新股數/舊股數;面額變更:factor=舊面額/新面額;大比例配股:factor=1+配股率;減資:factor=1−減資比例(股數變少,factor<1)。
 const CORP_ACTIONS={
-  '2327':[{date:'2025-08-25', factor:4, type:'par_change', note:'面額 10→2.5 元(等同 1 拆 4);2025-04-17 董事會決議、8/25 新股上市'}]
+  '2327':[{date:'2025-08-25', factor:4, type:'par_change', note:'面額 10→2.5 元(等同 1 拆 4);2025-04-17 董事會決議、8/25 新股上市'}],
+  '5904':[{date:'2026-08-10', factor:10, type:'par_change', note:'面額 10→1 元(每 1 股換 10 股);舊股最後交易日 2026-07-29、新股 8/10 恢復買賣;櫃買中心證櫃監字第 1150004034 號函'}],
+  '6669':[{date:'2026-09-02', factor:2.9827946, type:'stock_dividend', note:'盈餘轉增資每千股配 1,982.7946 股(可轉債轉換後調整),2026-09-02 除權;證交所除權參考價 2,614.99'}]
 };
 function caFactor(code,dateStr){ // 把 dateStr 當期的每股數值 ÷ 此值 → 換算到現行基準
   const acts=CORP_ACTIONS[String(code||'')]; if(!acts) return 1;
