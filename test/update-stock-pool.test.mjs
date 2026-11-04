@@ -390,6 +390,18 @@ assert.equal(wiwynnAfterBoth.div1, 48.408, '季更之後的日更不得再除一
 assert.equal(wiwynnAfterBoth.cheap, 0.394);
 assert.equal(wiwynnAfterBoth.q3, 10.06, '日更不得改動季更已換基準的 EPS');
 
+// 四種執行順序都只能除一次；日更→日更、季更→日更已在上方驗過，這裡補另外兩種。
+const dailyThenQuarterly = buildFundamentalsCandidate([buildCandidate([wiwynnBefore], new Map([['6669', 1770]]), '2026-11-03').updated[0]], new Map([['6669', wiwynnRows]]), '2026-11-14').updated[0];
+assert.equal(dailyThenQuarterly.div1, 48.408, '日更→季更不得再除一次');
+assert.equal(dailyThenQuarterly.perShareBasis, '2026-11-03', '季更不得改寫已記下的基準日');
+assert.equal(dailyThenQuarterly.q3, 10.06);
+assert.equal(dailyThenQuarterly.q4, 10);
+assert.equal(dailyThenQuarterly.cheap, 0.581, '日更算好的便宜度不得被季更改掉');
+const quarterlyTwice = buildFundamentalsCandidate([wiwynnQuarterly], new Map([['6669', wiwynnRows]]), '2026-11-21').updated[0];
+assert.equal(quarterlyTwice.div1, 48.408, '季更→季更不得再除一次');
+assert.equal(quarterlyTwice.perShareBasis, '2026-11-14');
+assert.equal(quarterlyTwice.q3, 10.06);
+
 // 審查補測：q1–q4 只除期末早於生效日的季別；已是新基準的 2026Q3 不得再除。
 const wiwynnWithQ3 = { ...wiwynnBefore, q1: 74.21, q1Period: '2025Q4', q2: 75.95, q2Period: '2026Q1', q3: 80.43, q3Period: '2026Q2', q4: 27.5, q4Period: '2026Q3' };
 const wiwynnMixed = buildCandidate([wiwynnWithQ3], new Map([['6669', 1770]]), '2026-11-20').updated[0];
