@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { CORPORATE_ACTIONS, FIXED_STOCK_CODES, adjustStoredPerShare, assertPriceDateReady, atomicWriteJson, buildCandidate, buildFundamentalsCandidate, cheapSummary, finMindFundamentals, finMindPrice, officialPriceUrls, pricesWithFallback, rowMap, validateUniverse } from '../scripts/update-stock-pool.mjs';
+import { CORPORATE_ACTIONS, FIXED_STOCK_CODES, adjustStoredPerShare, buildDividendCandidate, compareOfficialDividends, corporateActionFindings, loadPageCompute, parseOfficialDividendEvents, parseOfficialReductions, assertPriceDateReady, atomicWriteJson, buildCandidate, buildFundamentalsCandidate, cheapSummary, finMindFundamentals, finMindPrice, officialPriceUrls, pricesWithFallback, rowMap, validateUniverse } from '../scripts/update-stock-pool.mjs';
 
 const fixture = JSON.parse(await fs.readFile(new URL('./fixtures/twse-closing-sample.json', import.meta.url), 'utf8'));
 const fundamentalFixture = JSON.parse(await fs.readFile(new URL('./fixtures/fundamentals-common-period.json', import.meta.url), 'utf8'));
@@ -428,3 +428,97 @@ assert.ok(pageCorpMatch, 'index.html 必須有 CORP_ACTIONS');
 const pageCorp = new Function(`return ${pageCorpMatch[1]};`)();
 const pairs = table => Object.entries(table).flatMap(([code, actions]) => actions.map(action => [code, action.date ?? action.effectiveDate, action.factor])).sort();
 assert.deepEqual(pairs(pageCorp), pairs(CORPORATE_ACTIONS), '網頁與更新器的面額／股數變更表必須相同');
+
+// ── 股利每週更新（2026-11-20 Brook 確認的規則）──────────────────────────────
+// 更新器直接執行 index.html STOCK-COMPUTE 段的 computeJS；這裡用小型假資料驗證規則本身。
+const pageCompute = loadPageCompute(indexHtml);
+assert.equal(typeof pageCompute.computeJS, 'function', '更新器必須能執行網頁的 computeJS');
+assert.equal(pageCompute.CORP_ACTIONS['6176'][0].factor, 0.75, '瑞儀減資係數');
+assert.equal(CORPORATE_ACTIONS['6176'][0].effectiveDate, '2026-08-24');
+const flatPrices = (from, to, close = 100) => {
+  const rows = [];
+  for (let t = Date.parse(`${from}T00:00:00Z`); t <= Date.parse(`${to}T00:00:00Z`); t += 864e5) {
+    const d = new Date(t);
+    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) rows.push({ date: d.toISOString().slice(0, 10), close });
+  }
+  return rows;
+};
+const at = date => Date.parse(`${date}T06:00:00Z`);
+const cashRow = (date, cash, year) => ({ CashExDividendTradingDate: date, CashEarningsDistribution: cash, CashStatutorySurplus: 0, year });
+const priceSeries = flatPrices('2019-01-01', '2027-03-01');
+const ttmDiv = (rows, date) => pageCompute.computeJS(priceSeries.filter(r => r.date <= date), rows, [], [], '9999', at(date)).div1;
+// 防呆 1：一年一配、除息日提早，一年視窗內有兩次時只算最新一次
+const earlier = [cashRow('2024-07-16', 0.5, '112年'), cashRow('2025-07-15', 0.5, '113年'), cashRow('2026-06-30', 0.5, '114年')];
+assert.equal(ttmDiv(earlier, '2026-07-10'), 0.5, '一年一配不得重複算兩次');
+// 防呆 2：除息日延後、視窗內暫時沒有，18 個月內配過就算最近一次；超過 18 個月才算 0
+const later = [cashRow('2024-06-20', 1.3, '112年'), cashRow('2025-06-17', 1.5, '113年'), cashRow('2026-08-11', 0.4, '114年')];
+assert.equal(ttmDiv(later, '2026-07-10'), 1.5, '除息日延後時不得算成 0');
+assert.equal(ttmDiv(later, '2026-08-11'), 0.4, '新一次除息後改算新的金額');
+assert.equal(ttmDiv([cashRow('2022-07-26', 0.508, '110年')], '2026-11-19'), 0, '超過 18 個月沒配息才算 0');
+// 半年配、季配不受防呆 1 影響，照常加總
+assert.equal(ttmDiv([cashRow('2025-12-17', 9.5, '114年前半年度'), cashRow('2026-07-13', 12.3, '114年後半年度')], '2026-11-19'), 21.8);
+assert.equal(ttmDiv([cashRow('2026-03-20', 17, '114年後半年度'), cashRow('2026-09-21', 18, '115年前半年度')], '2026-11-19'), 35);
+
+// 股利欄位寫入：用官方收盤價、重新判定排除、清掉過期的除息日期、記下基準日
+const divStock = { name: '測', code: '9999', type: 'stock', J: 100, Jdate: '2026-11-19', div1: 0, divEarn1: 0, avgYld5: 0.05, cheap: 0, divYldAll: 0, exDate: '2025-07-01', payDate: '2025-08-01',
+  q1: 1, q2: 1, q3: 1, q4: 1, q1Period: '2025Q3', q2Period: '2025Q4', q3Period: '2026Q1', q4Period: '2026Q2',
+  dataStatus: { price: 'ok', fundamentals: 'ok', cheap: 'missing', medAK: 'ok', excludedFrom: ['medCheap', 'score', 'signal'] } };
+const divInputs = new Map([['9999', { pr: priceSeries.filter(r => r.date <= '2026-11-19'), dv: [cashRow('2024-07-10', 5, '112年'), cashRow('2025-07-10', 5, '113年'), cashRow('2026-07-10', 5, '114年')] }]]);
+const divResult = buildDividendCandidate([divStock], divInputs, '2026-11-19', pageCompute);
+const divRow = divResult.updated[0];
+assert.equal(divRow.div1, 5);
+assert.equal(divRow.divYldAll, 0.05);
+assert.equal(divRow.cheap, 1);
+assert.equal(divRow.perShareBasis, '2026-11-19');
+assert.equal(divRow.exDate, undefined, '已過期的除息日期要清掉');
+assert.equal(divRow.payDate, undefined);
+assert.deepEqual(divRow.dataStatus.excludedFrom, [], '股利恢復後不得沿用舊的排除標記');
+assert.deepEqual(divResult.changedCodes, ['9999']);
+assert.deepEqual(buildDividendCandidate(divResult.updated, divInputs, '2026-11-19', pageCompute).updated, divResult.updated, '同一天重跑結果相同');
+assert.throws(() => buildDividendCandidate([{ ...divStock, Jdate: '2026-11-18' }], divInputs, '2026-11-19', pageCompute), /要先跑同一天的股價更新/);
+assert.throws(() => buildDividendCandidate([divStock], new Map([['9999', { ...divInputs.get('9999'), pr: priceSeries.filter(r => r.date <= '2026-11-18') }]]), '2026-11-19', pageCompute), /ends at 2026-11-18/);
+const noDiv = buildDividendCandidate([divStock], new Map([['9999', { pr: divInputs.get('9999').pr, dv: [cashRow('2022-07-26', 0.5, '110年')] }]]), '2026-11-19', pageCompute).updated[0];
+assert.equal(noDiv.div1, 0);
+assert.equal(noDiv.cheap, 0);
+assert.ok(noDiv.dataStatus.excludedFrom.includes('score'), '長期沒配息仍排除評分');
+
+// 官方核對：除息日與現金股利要和證交所、櫃買中心一致；權息合併列示只核對日期
+const twsePayload = { stat: 'OK', fields: ['資料日期', '股票代號', '股票名稱', '除權息前收盤價', '除權息參考價', '權值+息值', '權/息'], data: [
+  ['115年07月10日', '9999', '測', '105', '100', '5.000000', '息'],
+  ['115年08月01日', '9998', '混', '50', '45', '3.000000', '權息'],
+  ['115年09月01日', '9997', '權', '50', '45', '1.000000', '權']] };
+const tpexPayload = { tables: [{ fields: ['除權息日期', '代號', '名稱', '現金股利'], data: [['115/07/16', '9996', '櫃', '2.55000000']] }] };
+const officialEvents = parseOfficialDividendEvents({ twse: twsePayload, tpex: tpexPayload });
+assert.deepEqual(officialEvents.get('9999'), [{ date: '2026-07-10', cash: 5, source: 'TWSE' }]);
+assert.equal(officialEvents.get('9998')[0].cash, null);
+assert.equal(officialEvents.has('9997'), false, '純配股不算現金股利');
+const checkStocks = ['9999', '9998', '9996', '9995'].map(code => ({ code }));
+const checkInputs = new Map([
+  ['9999', { dv: [cashRow('2026-07-10', 5, '114年')] }],
+  ['9998', { dv: [cashRow('2026-08-01', 1, '114年')] }],
+  ['9996', { dv: [cashRow('2026-07-16', 2.55, '114年')] }],
+  ['9995', { dv: [] }]]);
+const okCheck = compareOfficialDividends(checkStocks, checkInputs, officialEvents, '2026-11-19');
+assert.deepEqual(okCheck, { matched: 3, mixedCodes: ['9998'], mismatches: [] });
+const badInputs = new Map([...checkInputs, ['9999', { dv: [cashRow('2026-07-10', 4, '114年')] }], ['9995', { dv: [cashRow('2026-08-20', 1, '114年')] }]]);
+const badCheck = compareOfficialDividends(checkStocks, badInputs, officialEvents, '2026-11-19');
+assert.equal(badCheck.mismatches.length, 2, '金額或除息日對不上都要擋');
+assert.throws(() => parseOfficialDividendEvents({ twse: { stat: '查詢日期大於可查詢最大日期' }, tpex: tpexPayload }), /證交所除權息資料無法取得/);
+
+// 股數變更檢查：未登錄的減資、或扣除除息配股後仍超過漲跌幅的單日變動，都要擋下
+assert.deepEqual(parseOfficialReductions({ stat: '很抱歉，沒有符合條件的資料!' }), []);
+const reductions = parseOfficialReductions({ stat: 'OK', fields: ['恢復買賣日期', '股票代號', '名稱'], data: [['115/08/24', '6176', '瑞儀'], ['115/05/04', '9999', '測']] });
+const jumpRows = [{ date: '2026-07-09', close: 542 }, { date: '2026-07-13', close: 467.5 }, { date: '2026-07-14', close: 468 }, { date: '2026-09-01', close: 468 }, { date: '2026-09-02', close: 300 }];
+const caInputs = new Map([['9999', { pr: jumpRows, dv: [cashRow('2026-07-10', 23, '114年')] }], ['6176', { pr: [{ date: '2026-08-12', close: 81.3 }, { date: '2026-08-24', close: 101.5 }], dv: [] }]]);
+const caFindings = corporateActionFindings([{ code: '9999' }, { code: '6176' }], caInputs, reductions, pageCompute, '2026-11-19');
+assert.deepEqual(caFindings, ['9999 2026-05-04 官方減資未登錄', '9999 2026-09-02 單日 -35.9%'], '休市日除息不誤報、已登錄的瑞儀減資不誤報');
+// 櫃買中心減資表（民國年 7 碼日期）也要納入核對
+assert.deepEqual(parseOfficialReductions({ tables: [{ fields: ['恢復買賣日期', '股票代號', '名稱'], data: [['1150112', '8093', '保銳']] }] }), [{ date: '2026-01-12', code: '8093' }]);
+assert.deepEqual(parseOfficialReductions({ tables: [{ fields: [], data: [] }] }), []);
+// 已登錄但計算日之後才生效的事件，不得提前換算（避免股利先換基準、生效後又再除一次）
+const futureHtml = indexHtml.replace("const CORP_ACTIONS={", "const CORP_ACTIONS={\n  '9999':[{date:'2026-12-15', factor:2}],");
+const futureCompute = loadPageCompute(futureHtml, '2026-11-19');
+assert.equal(futureCompute.caFactor('9999', '2026-07-10'), 1, '計算日 11/19 時，12/15 才生效的事件不得換算');
+assert.equal(buildDividendCandidate([divStock], divInputs, '2026-11-19', futureCompute).updated[0].div1, 5, '股利不得被提前除以 2');
+assert.equal(loadPageCompute(futureHtml, '2026-12-16').caFactor('9999', '2026-07-10'), 2, '生效後才換算');
+console.log('DIVIDEND TEST OK: page computeJS reuse, annual dedupe, 18-month fallback, field write-back, official cross-check, corporate-action guard');

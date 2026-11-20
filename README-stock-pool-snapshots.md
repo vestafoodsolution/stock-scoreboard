@@ -14,6 +14,17 @@
 
 季更使用現有網頁 `computeJS()` 相同的定義：最近四季 EPS 合計 ÷ 前四季 EPS 合計 − 1；若前四季合計不大於零，該檔 AK 為空值、不納入中位數。ETF 沿用既有「無 EPS」設定。國巨等發生面額／股數變更的公司會先將前後期每股數字調整到相同比較基準。季度快照會寫入財報資料日、期間結束日與下一法定公告期限。
 
+## 股利與風險欄位（每週，2026-11-20 起）
+
+`--target=dividends` 重算近一年股利、五年平均殖利率、最大回撤、波動、填息率與除息日期；`--target=weekly` 依序跑股價、股利、財報，是 Codex 每週排程用的目標。
+
+- 算法不另寫：更新器直接執行 `index.html` 裡 `STOCK-COMPUTE-BEGIN`／`STOCK-COMPUTE-END` 之間的 `computeJS`，網頁「完整更新」與快照是同一套公式。
+- 近一年股利看 365 天視窗內的現金股利，另有兩條防呆：一年一配（FinMind `year` 欄為「NNN年」）的公司，視窗內有兩次只算最新一次；視窗內沒有、但 18 個月內配過，算最近一次；超過 18 個月才算 0。
+- 寫入前與證交所 `TWT49U`、櫃買中心除權息資料逐檔核對除息日與現金股利；證交所「權息」列只給合計，只核對日期。任一檔不一致就不寫入。
+- 查證交所減資表（自 2026-01-01），並掃描扣除除息、配股後仍超過 10.5% 的單日變動；有未登錄在 `CORPORATE_ACTIONS` 的事件就不寫入。新事件要同時加進更新器 `CORPORATE_ACTIONS` 與 `index.html` 的 `CORP_ACTIONS`，測試會檢查兩張表一致。
+- 每次重新判定 `dataStatus`：股利恢復就解除排除，長期沒配息的維持排除；寫入後 `perShareBasis` 記為當日，避免每股數字重複換算。
+- 每次約呼叫 FinMind 176 次（股價與股利 118 次、財報 58 次）。加 `--cache-dir=<資料夾>` 會把原始資料存起來，乾跑與正式寫入共用、額度用完（HTTP 402）後重跑會接著抓。
+
 59 檔名單必須完整且不得重複；股價補檔後仍必須 59/59 才能產生、寫入或推送日更快照。任何一檔官方與 FinMind 都沒有可用價格時，流程直接失敗並保留上一份快照，不以最後已知值冒充本次資料。
 
 ## 怎麼先驗證
@@ -25,6 +36,7 @@ node scripts/update-stock-pool.mjs --self-test
 node test/update-stock-pool.test.mjs
 node scripts/update-stock-pool.mjs --target=price --date=2026-07-29
 node scripts/update-stock-pool.mjs --target=fundamentals --date=2026-05-10
+node scripts/update-stock-pool.mjs --target=weekly --date=2026-11-19 --cache-dir=/private/tmp/stock-scoreboard-cache
 ```
 
 後兩行都是預設乾跑：日更先驗證官方價格，再以同日 FinMind `TaiwanStockPrice` 補齊官方缺檔，並要求 59/59；季更選擇最新共同完整八季期末。固定名單不符、在當日 14:00 前誤跑、價格補檔後仍非 59/59、資料格式改變或無有效中位數時，流程直接失敗且不寫檔。

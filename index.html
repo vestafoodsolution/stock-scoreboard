@@ -312,8 +312,6 @@ function recalcFromPrice(s){
 // 一律用 Asia/Taipei「純日期字串(YYYY-MM-DD)」比較,避免 UTC 造成台灣 00:00–08:00 判斷錯誤
 const parseD=s=>{const d=new Date(s);return isNaN(d)?null:d;};
 const tpeToday=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Taipei'}); // 'YYYY-MM-DD'
-const isoDate=d=>d.toLocaleDateString('en-CA'); // 本地(Date 物件已為當地時間)→ 純日期字串
-function prevTradingDay(dateStr){ const x=new Date(dateStr+'T12:00:00'); do{ x.setDate(x.getDate()-1); }while(x.getDay()===0||x.getDay()===6); return isoDate(x); } // 除息前一交易日(略過週末,不含國定假日,為近似);回傳純日期字串
 function divState(s){
   const t=tpeToday();                                          // 今天(台灣純日期)
   const ex=s.exDate||null, pay=s.payDate||null;
@@ -340,6 +338,15 @@ const HOT_DESC={
 // 固定母體=DEFAULT_DATA 的代號集合(數量固定);數值以最新 canonical 為基準。
 // 個人新增/刪除觀察股不改母體(自訂代號不在母體;刪除的內建股仍以最新已知值留在母體)。
 function excludedFrom(s,key){return !!(s&&s.dataStatus&&Array.isArray(s.dataStatus.excludedFrom)&&s.dataStatus.excludedFrom.includes(key));}
+// 股利重抓後,依新股利重新判定便宜度狀態;規則與 scripts/update-stock-pool.mjs 的 dataStatus() 相同
+function refreshCheapStatus(s){
+  if(!s||!s.dataStatus) return;
+  const st={...s.dataStatus, cheap:(nn(s.cheap)!=null&&nn(s.divYldAll)>0)?'ok':'missing'};
+  if(s.dataStatus.price==='missing') st.cheap='missing';
+  const ex=[]; if(st.price==='missing')ex.push('price'); if(st.cheap==='missing')ex.push('medCheap','score','signal');
+  if(st.fundamentals==='missing')ex.push('fundamentals'); if(st.medAK==='missing')ex.push('medAK','score','signal');
+  st.excludedFrom=[...new Set(ex)]; s.dataStatus=st;
+}
 function analysisExclusionReasons(s){
   const status=s&&s.dataStatus||{},reasons=[];
   if(status.price==='missing')reasons.push('當次股價缺漏');
@@ -687,7 +694,11 @@ function adviceHTML(s,c){
 }
 
 // ── FinMind ──
+// ==STOCK-COMPUTE-BEGIN== 以下到 STOCK-COMPUTE-END 是股價、股利、EPS 的唯一算法。
+// scripts/update-stock-pool.mjs 會原樣執行這一段算快照，改這裡就同時改了網頁與快照，不要另寫一份。
 const iso=t=>new Date(t).toISOString().slice(0,10);
+function isoDate(d){ return d.toLocaleDateString('en-CA'); } // 本地(Date 物件已為當地時間)→ 純日期字串
+function prevTradingDay(dateStr){ const x=new Date(dateStr+'T12:00:00'); do{ x.setDate(x.getDate()-1); }while(x.getDay()===0||x.getDay()===6); return isoDate(x); } // 除息前一交易日(略過週末,不含國定假日,為近似);回傳純日期字串
 function fmURL(ds,id,sd){const t=localStorage.getItem('finmind-token')||'';return `https://api.finmindtrade.com/api/v4/data?dataset=${ds}&data_id=${id}&start_date=${sd}`+(t?`&token=${encodeURIComponent(t)}`:'');}
 async function fm(ds,id,sd){const d=await(await fetch(fmURL(ds,id,sd))).json(); if(d.status!==200)throw new Error('quota'); return d.data||[];}
 const Dt=s=>{const d=new Date(s);return isNaN(d)?null:d;};
@@ -697,12 +708,13 @@ const Dt=s=>{const d=new Date(s);return isNaN(d)?null:d;};
 const CORP_ACTIONS={
   '2327':[{date:'2025-08-25', factor:4, type:'par_change', note:'面額 10→2.5 元(等同 1 拆 4);2025-04-17 董事會決議、8/25 新股上市'}],
   '5904':[{date:'2026-08-10', factor:10, type:'par_change', note:'面額 10→1 元(每 1 股換 10 股);舊股最後交易日 2026-07-29、新股 8/10 恢復買賣;櫃買中心證櫃監字第 1150004034 號函'}],
-  '6669':[{date:'2026-09-02', factor:2.9827946, type:'stock_dividend', note:'盈餘轉增資每千股配 1,982.7946 股(可轉債轉換後調整),2026-09-02 除權;證交所除權參考價 2,614.99'}]
+  '6669':[{date:'2026-09-02', factor:2.9827946, type:'stock_dividend', note:'盈餘轉增資每千股配 1,982.7946 股(可轉債轉換後調整),2026-09-02 除權;證交所除權參考價 2,614.99'}],
+  '6176':[{date:'2026-08-24', factor:0.75, type:'capital_reduction', note:'現金減資 25%,每千股換 750 股、每股退 2.5 元;換發新股 2026-08-24 上市買賣,證交所恢復買賣參考價 105.06'}]
 };
 function caFactor(code,dateStr){ // 把 dateStr 當期的每股數值 ÷ 此值 → 換算到現行基準
   const acts=CORP_ACTIONS[String(code||'')]; if(!acts) return 1;
   const t=Dt(dateStr); if(!t) return 1;
-  let f=1; for(const a of acts){ const ad=Dt(a.date); if(ad&&t.getTime()<ad.getTime()) f*=(a.factor||1); }
+  let f=1; for(const a of acts){ const ad=Dt(a.date); if(ad&&ad.getTime()<=Date.now()&&t.getTime()<ad.getTime()) f*=(a.factor||1); } // 已登錄但尚未生效的事件不換算
   return f;
 }
 // ── 滾動四季 TTM EPS(只用「連續四季窗口」,絕不跨年拼接) ──
@@ -744,8 +756,8 @@ function buildEPS(fs, code){
   o.AK=AK; o.epsGrowthLabel=label;                                        // AK=TTM年增率;不適用時為 null
   return o;
 }
-function computeJS(price,div,fs,bs,code){
-  const o={}, now=Date.now(), DAY=864e5;
+function computeJS(price,div,fs,bs,code,asOfMs){
+  const o={}, now=asOfMs??Date.now(), DAY=864e5;   // asOfMs:更新器指定計算日;網頁不傳=現在
   // 股價序列:公司行動前的價格 ÷factor,消除分割/面額變更/減資的假性跳空(讓波動、回撤、填息判斷連續)
   const px=(price||[]).filter(r=>r.close&&Dt(r.date)).map(r=>[Dt(r.date).getTime(), r.close/caFactor(code,r.date)]).sort((a,b)=>a[0]-b[0]);
   if(px.length){ const last=px[px.length-1]; o.J=+last[1].toFixed(2); o.Jdate=iso(last[0]);
@@ -757,16 +769,26 @@ function computeJS(price,div,fs,bs,code){
   const pbefore=t=>{let b=null;for(const p of px){if(p[0]<=t)b=p[1];else break;}return b;};
   // 股利事件:每股配息額 ÷factor(換算到現行基準);同時保留除息日/發放日
   const evs=(div||[]).map(r=>{const exs=r.CashExDividendTradingDate, f=caFactor(code,exs);
-      return [Dt(exs), (+r.CashEarningsDistribution||0)/f, (+r.CashStatutorySurplus||0)/f];})
-    .filter(e=>e[0]&&(e[1]+e[2])>0).map(e=>[e[0].getTime(),e[1],e[2]]).sort((a,b)=>a[0]-b[0]);
-  const Y=365*DAY, tdiv=t=>evs.filter(e=>t-Y<e[0]&&e[0]<=t).reduce((a,e)=>a+e[1]+e[2],0), tearn=t=>evs.filter(e=>t-Y<e[0]&&e[0]<=t).reduce((a,e)=>a+e[1],0);
+      return [Dt(exs), (+r.CashEarningsDistribution||0)/f, (+r.CashStatutorySurplus||0)/f, String(r.year||'')];})
+    .filter(e=>e[0]&&(e[1]+e[2])>0).map(e=>[e[0].getTime(),e[1],e[2],e[3]]).sort((a,b)=>a[0]-b[0]);
+  const Y=365*DAY, tdiv=t=>evs.filter(e=>t-Y<e[0]&&e[0]<=t).reduce((a,e)=>a+e[1]+e[2],0);
+  // 近一年股利(顯示、殖利率、便宜度用):365 天視窗 + 兩條防呆,避免除息日前後移動造成假訊號
+  //  1) 一年一配(FinMind year 標籤為「NNN年」)的公司,視窗內有兩次時只算最新一次(除息日提早)
+  //  2) 視窗內沒有配息、但 18 個月內配過,算最近一次(除息日延後);超過 18 個月才算 0
+  const annual=e=>/^\d+年$/.test(e[3]);
+  const ttmEv=t=>{ let w=evs.filter(e=>t-Y<e[0]&&e[0]<=t);
+    if(w.length){ const ann=w.filter(annual); if(ann.length>=2){ const keep=ann[ann.length-1]; w=w.filter(e=>!annual(e)||e===keep); } return w; }
+    const past=evs.filter(e=>e[0]<=t), lastEv=past[past.length-1];
+    if(lastEv&&t-lastEv[0]<=548*DAY) return annual(lastEv)?[lastEv]:past.filter(e=>e[3]===lastEv[3]);
+    return []; };
+  const ttm=ttmEv(now), ttmAll=ttm.reduce((a,e)=>a+e[1]+e[2],0), ttmEarn=ttm.reduce((a,e)=>a+e[1],0);
   if(px.length&&evs.length){ const last=o.J;
-    o.divEarn1=+tearn(now).toFixed(3); o.div1=+tdiv(now).toFixed(3);
-    o.divYldEarn=+(tearn(now)/last).toFixed(4); o.divYldAll=+(tdiv(now)/last).toFixed(4);
+    o.divEarn1=+ttmEarn.toFixed(3); o.div1=+ttmAll.toFixed(3);
+    o.divYldEarn=+(ttmEarn/last).toFixed(4); o.divYldAll=+(ttmAll/last).toFixed(4);
     o.div5=+(evs.filter(e=>now-e[0]<Y*5).reduce((a,e)=>a+e[1]+e[2],0)/5).toFixed(3);
     const yrs=new Set(evs.filter(e=>e[0]<=now).map(e=>new Date(e[0]).getFullYear())); let n=0,y=Math.max(...yrs); while(yrs.has(y-n))n++; o.divYears=n;
     const hy=[]; evs.forEach(e=>{if(now-e[0]<Y*5){const b=pbefore(e[0]);if(b)hy.push(tdiv(e[0])/b);}});
-    if(hy.length){const avg=hy.reduce((a,b)=>a+b,0)/hy.length; if(avg){o.cheap=+((tdiv(now)/last)/avg).toFixed(3); o.avgYld5=+avg.toFixed(4);}}
+    if(hy.length){const avg=hy.reduce((a,b)=>a+b,0)/hy.length; if(avg){o.cheap=+((ttmAll/last)/avg).toFixed(3); o.avgYld5=+avg.toFixed(4);}}
     let fh=0,ft=0,fd=[]; evs.slice(-5).forEach(e=>{const b=pbefore(e[0]-DAY);if(!b)return;ft++;const hit=px.find(p=>p[0]>e[0]&&p[0]<=e[0]+180*DAY&&p[1]>=b);if(hit){fh++;fd.push(Math.round((hit[0]-e[0])/DAY));}});
     if(ft){o.fillRate=+(fh/ft).toFixed(3);o.fillN=ft;} if(fd.length)o.fillDays=Math.round(fd.reduce((a,b)=>a+b,0)/fd.length);
     // 配息日期:取當前週期=最近一個「發放尚未完成」的除息事件(可參與或等待入帳);全部已完成則不設(無進行中配息)
@@ -784,6 +806,7 @@ function computeJS(price,div,fs,bs,code){
   const eq=pick(bs,'EquityAttributableToOwnersOfParent'); if(ttmNi&&eq.length&&eq[eq.length-1])o.roe=+(ttmNi/eq[eq.length-1]).toFixed(4);
   return o;
 }
+// ==STOCK-COMPUTE-END==
 // ── 唯一的標準化更新流程:預設股/新增股/單檔/全部/快速更新都走這裡,公式不分岔 ──
 // full=true:抓股價+股利+財報+資產負債→computeJS 全量重算;full=false:只刷股價→recalcFromPrice。
 // 兩者都保留使用者資料(持有價等),只更新基本面/股價/股利/日期。
@@ -806,6 +829,7 @@ async function updateStock(s, full){
       if(cand.div1==null && Array.isArray(dv) && dv.length){ cand.div1=0; cand.divEarn1=0; cand.divYldAll=0; cand.divYldEarn=0; }
       for(const k in cand) if(cand[k]!=null) s[k]=cand[k];
       for(const k of EPS_KEYS) if(k in cand) s[k]=cand[k];            // EPS 來源欄位(含 null AK/false fallback)整批落地
+      refreshCheapStatus(s);                                          // 股利重抓後重新判定是否排除(舊快照的排除標記不得沿用)
       if(type==='etf') s.etfUpdatedAt = cand.Jdate || iso(now);       // ETF 更新時間標記(解安全閘用;不冒充 EPS)
       return {ok:true, incomplete: (type!=='etf' && s.epsInsufficient===true)};
     } else {
@@ -987,6 +1011,7 @@ function stockPoolSourceText(snapshot){
   const priceDate=price.asOf;
   const fallbackDate=stocks.map(s=>s.Jdate).filter(Boolean).sort().pop();
   const fundamentals=snapshot&&snapshot.fundamentals||{};
+  const dividends=snapshot&&snapshot.dividends||null;
   const epsDate=fundamentals.asOf||fundamentals.periodEnd||null;
   const priceText=priceDate||fallbackDate||'未提供';
   const epsText=epsDate||'內嵌快照（季度期別未提供）';
@@ -1000,7 +1025,7 @@ function stockPoolSourceText(snapshot){
   const priceExcluded=Array.isArray(price.excludedCodes)&&price.excludedCodes.length?' · 本次排除 '+price.excludedCodes.join('、'):'';
   const fundamentalsCoverage=fundamentals.coverage?' · 分析涵蓋 '+fundamentals.coverage:'';
   const fundamentalsExcluded=Array.isArray(fundamentals.excludedCodes)&&fundamentals.excludedCodes.length?' · 本次排除 '+fundamentals.excludedCodes.join('、'):'';
-  return '股價：股價資料快照 · '+priceSource+' · 資料截至 '+priceText+' · 最後完成交易日 '+lastTrading+priceCoverage+priceExcluded+'；財報／EPS：財報／EPS資料快照 · '+fundamentalsSource+' · 資料截至 '+epsText+period+deadline+fundamentalsCoverage+fundamentalsExcluded+valuation+'；非即時報價。';
+  return '股價：股價資料快照 · '+priceSource+' · 資料截至 '+priceText+' · 最後完成交易日 '+lastTrading+priceCoverage+priceExcluded+'；財報／EPS：財報／EPS資料快照 · '+fundamentalsSource+' · 資料截至 '+epsText+period+deadline+fundamentalsCoverage+fundamentalsExcluded+valuation+(dividends&&dividends.asOf?'；股利：'+(dividends.source||'FinMind TaiwanStockDividend')+' · 資料截至 '+dividends.asOf+(dividends.coverage?' · 涵蓋 '+dividends.coverage:''):'；股利：快照尚未定期更新')+'；非即時報價。';
 }
 function renderStockPoolSource(snapshot){
   const el=document.getElementById('pool-source');

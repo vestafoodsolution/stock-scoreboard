@@ -10,6 +10,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
+import vm from 'node:vm';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const INDEX_FILE = path.join(ROOT, 'index.html');
@@ -19,6 +20,7 @@ const args = new Set(process.argv.slice(2));
 const dryRun = !args.has('--write');
 const requestedDate = [...args].find(a => a.startsWith('--date='))?.slice(7) || taipeiDate();
 const target = [...args].find(a => a.startsWith('--target='))?.slice(9) || 'price';
+const cacheDirArg = [...args].find(a => a.startsWith('--cache-dir='))?.slice(12) || null;
 export const FIXED_STOCK_CODES = Object.freeze('6669,5283,6112,8044,8454,2317,2454,2330,2303,2409,2912,1216,5904,2729,1268,2327,2492,3026,3556,2915,9945,1532,2855,6016,2002,1101,1102,1802,3008,2404,1305,2881,2603,2618,6176,2108,3260,6121,2357,3034,1301,1702,2890,0056,3702,5871,2727,1737,2886,1817,2748,2379,6005,6195,3078,1537,1227,2548,6581'.split(','));
 
 function taipeiDate(now = new Date()) {
@@ -180,29 +182,21 @@ export async function officialPrices(date, options = {}) {
 const FINMIND_MAX_ATTEMPTS = 3;
 const FINMIND_RETRY_DELAYS_MS = [1000, 2000];
 
-function finMindUrl(code, start, token = process.env.FINMIND_TOKEN?.trim()) {
-  const params = new URLSearchParams({
-    dataset: 'TaiwanStockFinancialStatements',
-    data_id: String(code),
-    start_date: start
-  });
+function finMindDatasetUrl(dataset, code, start, end = null, token = process.env.FINMIND_TOKEN?.trim()) {
+  const params = new URLSearchParams({ dataset, data_id: String(code), start_date: start });
+  if (end) params.set('end_date', end);
   // The optional token is deliberately read only from the environment.  Never
   // log this URL: its query string may contain the credential.
   if (token) params.set('token', token);
   return `https://api.finmindtrade.com/api/v4/data?${params}`;
 }
 
-function finMindPriceUrl(code, start, end = start, token = process.env.FINMIND_TOKEN?.trim()) {
-  const params = new URLSearchParams({
-    dataset: 'TaiwanStockPrice',
-    data_id: String(code),
-    start_date: start,
-    end_date: end
-  });
-  // The optional token is deliberately read only from the environment.  Never
-  // log this URL: its query string may contain the credential.
-  if (token) params.set('token', token);
-  return `https://api.finmindtrade.com/api/v4/data?${params}`;
+function finMindUrl(code, start, token) {
+  return finMindDatasetUrl('TaiwanStockFinancialStatements', code, start, null, token);
+}
+
+function finMindPriceUrl(code, start, end = start, token) {
+  return finMindDatasetUrl('TaiwanStockPrice', code, start, end, token);
 }
 
 async function fetchFinMindWithRetry(url, code, { fetchImpl = fetch, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
@@ -222,6 +216,7 @@ async function fetchFinMindWithRetry(url, code, { fetchImpl = fetch, sleep = ms 
       continue;
     }
     if (response.status === 429) throw new Error(`FinMind rate limit (HTTP 429) for ${code} after ${attempt} attempts`);
+    if (response.status === 402) throw new Error(`FinMind 額度已用完（HTTP 402）for ${code}，約一小時後再試或設定 FINMIND_TOKEN`);
     if (response.status >= 500) throw new Error(`FinMind server error (HTTP ${response.status}) for ${code} after ${attempt} attempts`);
     throw new Error(`FinMind HTTP ${response.status} for ${code}`);
   }
@@ -376,7 +371,11 @@ export const CORPORATE_ACTIONS = Object.freeze({
   // 每千股配發 1,982.7946 股（2026-08-07 原公告 1,984.22578 股），2026-09-02 除權：
   // 每 1 舊股變 2.9827946 股。證交所除權除息計算結果表：除權前收盤 7,800、
   // 除權參考價 2,614.99（≈ 7,800 ÷ 2.9827946），每千股無償配股 1,982.8 股。
-  '6669': [{ effectiveDate: '2026-09-02', factor: 2.9827946 }]
+  '6669': [{ effectiveDate: '2026-09-02', factor: 2.9827946 }],
+  // 瑞儀 現金減資 25%：每仟股換發 750 股、每股退還 2.5 元，舊股最後交易日 2026-08-12，
+  // 換發新股 2026-08-24 上市買賣（證交所減資恢復買賣參考價 105.06）。factor < 1 代表股數變少：
+  // 生效前的每股數字除以 0.75 才是新股基準。來源：公開資訊觀測站現金減資基準日與換股公告。
+  '6176': [{ effectiveDate: '2026-08-24', factor: 0.75 }]
 });
 
 // 快照裡的股利（近一年、五年平均）不是每次重抓，而是從 index.html DEFAULT_DATA
@@ -608,6 +607,270 @@ export async function atomicWriteJson(file, value, options = {}) {
   }
 }
 
+// ── 股利與風險欄位（每週更新）────────────────────────────────────────────
+// 算法不在這裡另寫：直接執行 index.html 裡 STOCK-COMPUTE 標記之間的 computeJS，
+// 網頁「完整更新」與快照因此永遠是同一套公式。
+const DIVIDEND_FIELDS = Object.freeze(['div1', 'divEarn1', 'div5', 'divYears', 'avgYld5', 'mdd', 'vol', 'fillRate', 'fillN', 'fillDays']);
+const DIVIDEND_DATE_FIELDS = Object.freeze(['exDate', 'lastBuyDate', 'payDate']);
+export const CORPORATE_ACTION_CHECK_FROM = '2026-01-01';
+const DAY_MS = 864e5;
+const OFFICIAL_HEADERS = { headers: { 'user-agent': 'stock-scoreboard-snapshot/1.0' } };
+
+export function loadPageCompute(indexText, asOf = null) {
+  const begin = indexText.indexOf('// ==STOCK-COMPUTE-BEGIN==');
+  const end = indexText.indexOf('// ==STOCK-COMPUTE-END==');
+  if (begin < 0 || end < begin) throw new Error('index.html STOCK-COMPUTE block not found');
+  const globals = {
+    localStorage: { getItem: () => null },
+    fetch: () => { throw new Error('page compute must not fetch'); }
+  };
+  if (asOf) {
+    // 網頁的「現在」固定成計算日：caFactor 不換算計算日之後才生效的事件，回補舊日期也一樣。
+    const fixedNow = asOfMillis(asOf);
+    globals.Date = class extends Date { static now() { return fixedNow; } };
+  }
+  const context = vm.createContext(globals);
+  vm.runInContext(`${indexText.slice(begin, end)}\n;globalThis.__pageCompute = { computeJS, caFactor, CORP_ACTIONS };`, context, { filename: 'index.html#STOCK-COMPUTE' });
+  return context.__pageCompute;
+}
+
+function shiftDate(date, days) {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+function asOfMillis(date) {
+  return Date.parse(`${date}T06:00:00Z`); // 台北 14:00，當日收盤後
+}
+
+function inDividendWindow(date, asOf) {
+  return typeof date === 'string' && date > shiftDate(asOf, -365) && date <= asOf; // 與 computeJS 的 t-365 天 < 除息日 ≤ t 相同
+}
+
+function cashOf(row) {
+  return (num(row.CashEarningsDistribution) || 0) + (num(row.CashStatutorySurplus) || 0);
+}
+
+function stockDividendOf(row) {
+  return (num(row.StockEarningsDistribution) || 0) + (num(row.StockStatutorySurplus) || 0);
+}
+
+async function finMindRows(dataset, code, start, end, options = {}) {
+  const response = await fetchFinMindWithRetry(finMindDatasetUrl(dataset, code, start, end), code, options);
+  const body = await response.json();
+  if (body.status !== 200 || !Array.isArray(body.data)) throw new Error(`FinMind ${dataset} unavailable for ${code}`);
+  return body.data;
+}
+
+export async function fetchDividendInputs(codes, asOf, { cacheDir = null, fetchImpl = fetch, sleep } = {}) {
+  // 每檔兩次 FinMind 呼叫。免 token 額度用完時停止，已抓的存在 cacheDir，同一日期重跑會接著抓。
+  const inputs = new Map();
+  const failures = [];
+  const queue = [...codes];
+  const dir = cacheDir ? path.join(cacheDir, asOf) : null;
+  if (dir) await fs.mkdir(dir, { recursive: true });
+  let stop = false;
+  await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
+    while (queue.length && !stop) {
+      const code = queue.shift();
+      const file = dir ? path.join(dir, `${code}.json`) : null;
+      try {
+        if (file) {
+          try { inputs.set(code, JSON.parse(await fs.readFile(file, 'utf8'))); continue; }
+          catch (error) { if (error.code !== 'ENOENT') throw error; }
+        }
+        const [prices, dividends] = await Promise.all([
+          finMindRows('TaiwanStockPrice', code, shiftDate(asOf, -(365 * 7 + 30)), asOf, { fetchImpl, sleep }),
+          finMindRows('TaiwanStockDividend', code, shiftDate(asOf, -365 * 12), null, { fetchImpl, sleep })
+        ]);
+        const input = { asOf, pr: prices.map(row => ({ date: String(row.date), close: num(row.close) })).filter(row => row.close > 0), dv: dividends };
+        const lastDate = input.pr.filter(row => row.date <= asOf).at(-1)?.date;
+        if (lastDate !== asOf) throw new Error(`FinMind 還沒有 ${asOf} 的股價（最後 ${lastDate ?? '無'}），不存快取，晚點再跑`);
+        inputs.set(code, input);
+        if (file) await fs.writeFile(file, JSON.stringify(input), 'utf8');
+      } catch (error) {
+        failures.push(`${code}: ${error.message}`);
+        stop = true;
+      }
+    }
+  }));
+  if (failures.length || inputs.size !== codes.length) {
+    const hint = dir ? `；已存 ${inputs.size}/${codes.length} 檔於 ${dir}，用同一個 --cache-dir 重跑會接著抓` : '';
+    throw new Error(`dividend inputs incomplete (${inputs.size}/${codes.length}): ${failures.join('; ')}${hint}`);
+  }
+  return inputs;
+}
+
+export function buildDividendCandidate(stocks, inputs, asOf, compute) {
+  const asOfMs = asOfMillis(asOf);
+  const guardedCodes = [];
+  const changedCodes = [];
+  const updated = stocks.map(original => {
+    const code = normalizedCode(original);
+    const input = inputs.get(code);
+    if (!input) throw new Error(`dividend input missing for ${code}`);
+    const close = num(original.J);
+    if (original.Jdate !== asOf || !(close > 0)) throw new Error(`${code} 股價日期是 ${original.Jdate}，不是 ${asOf}；要先跑同一天的股價更新`);
+    const prices = input.pr.filter(row => row.date <= asOf);
+    if (prices.at(-1)?.date !== asOf) throw new Error(`FinMind price for ${code} ends at ${prices.at(-1)?.date ?? 'none'}, expected ${asOf}`);
+    if (!Array.isArray(input.dv) || !input.dv.length) throw new Error(`FinMind dividend history empty for ${code}`);
+    const o = compute.computeJS(prices, input.dv, [], [], code, asOfMs);
+    // 先把其他每股數字（四季 EPS）換到現行基準，再換上新算的股利；之後記下基準日，避免重複換算。
+    const next = { ...adjustStoredPerShare(original, asOf), perShareBasis: asOf };
+    for (const key of DIVIDEND_FIELDS) next[key] = o[key] ?? null;
+    if (o.div1 == null) { next.div1 = 0; next.divEarn1 = 0; }
+    for (const key of DIVIDEND_DATE_FIELDS) { if (o[key]) next[key] = o[key]; else delete next[key]; }
+    const sameClose = Number.isFinite(o.J) && Math.abs(o.J - close) < 0.005;
+    Object.assign(next, sameClose && o.cheap != null ? { divYldEarn: o.divYldEarn, divYldAll: o.divYldAll, cheap: o.cheap } : yieldFields(next, close));
+    if (next.div1 === 0) Object.assign(next, { divYldEarn: 0, divYldAll: 0, cheap: next.avgYld5 > 0 ? 0 : null });
+    const plainWindow = input.dv
+      .filter(row => inDividendWindow(row.CashExDividendTradingDate, asOf) && cashOf(row) > 0)
+      .reduce((sum, row) => sum + cashOf(row) / compute.caFactor(code, row.CashExDividendTradingDate), 0);
+    if (Math.abs(plainWindow - next.div1) > 0.0015) guardedCodes.push(code);
+    if (num(original.div1) !== next.div1 || num(original.cheap) !== next.cheap) changedCodes.push(code);
+    next.dataStatus = dataStatus(next, { cheap: next.cheap != null && next.divYldAll > 0 ? 'ok' : 'missing' });
+    return next;
+  });
+  return { updated, guardedCodes, changedCodes, ...cheapSummary(updated) };
+}
+
+export function officialDividendUrls(asOf) {
+  const start = shiftDate(asOf, -364);
+  return {
+    twse: `https://www.twse.com.tw/rwd/zh/exRight/TWT49U?startDate=${start.replaceAll('-', '')}&endDate=${asOf.replaceAll('-', '')}&response=json`,
+    tpex: `https://www.tpex.org.tw/web/stock/exright/dailyquo/exDailyQ_result.php?l=zh-tw&d=${encodeURIComponent(tpexRocDate(start))}&ed=${encodeURIComponent(tpexRocDate(asOf))}&o=json`,
+    reductions: `https://www.twse.com.tw/rwd/zh/reducation/TWTAUU?startDate=${CORPORATE_ACTION_CHECK_FROM.replaceAll('-', '')}&endDate=${asOf.replaceAll('-', '')}&response=json`,
+    tpexReductions: `https://www.tpex.org.tw/www/zh-tw/bulletin/revivt?startDate=${CORPORATE_ACTION_CHECK_FROM.replaceAll('-', '/')}&endDate=${asOf.replaceAll('-', '/')}&response=json`
+  };
+}
+
+function officialIsoDate(text) {
+  const compact = String(text ?? '').trim().match(/^(\d{3})(\d{2})(\d{2})$/); // 櫃買中心 1150112＝民國 115 年 1 月 12 日
+  if (compact) return `${Number(compact[1]) + 1911}-${compact[2]}-${compact[3]}`;
+  const m = String(text ?? '').match(/(\d{2,4})\D+(\d{1,2})\D+(\d{1,2})/);
+  if (!m) return null;
+  const year = Number(m[1]) < 1000 ? Number(m[1]) + 1911 : Number(m[1]);
+  return `${year}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+}
+
+function fieldIndex(fields, name) {
+  const index = (fields || []).findIndex(field => String(field).trim() === name);
+  if (index < 0) throw new Error(`official table field missing: ${name}`);
+  return index;
+}
+
+export function parseOfficialDividendEvents({ twse, tpex }) {
+  // 現金股利依除息日分組。證交所「權息」列只給權值＋息值合計，拆不出現金，金額記為 null（只核對日期）。
+  const events = new Map();
+  const add = (code, event) => { if (!events.has(code)) events.set(code, []); events.get(code).push(event); };
+  if (twse?.stat !== 'OK' || !Array.isArray(twse.data)) throw new Error('證交所除權息資料無法取得');
+  const tw = { date: fieldIndex(twse.fields, '資料日期'), code: fieldIndex(twse.fields, '股票代號'), kind: fieldIndex(twse.fields, '權/息'), value: fieldIndex(twse.fields, '權值+息值') };
+  for (const row of twse.data) {
+    const kind = String(row[tw.kind] ?? '').trim();
+    if (kind === '權') continue;
+    add(String(row[tw.code]).trim(), { date: officialIsoDate(row[tw.date]), cash: kind === '息' ? num(row[tw.value]) : null, source: 'TWSE' });
+  }
+  const table = tpex?.tables?.[0];
+  if (!table || !Array.isArray(table.data)) throw new Error('櫃買中心除權息資料無法取得');
+  const tp = { date: fieldIndex(table.fields, '除權息日期'), code: fieldIndex(table.fields, '代號'), cash: fieldIndex(table.fields, '現金股利') };
+  for (const row of table.data) {
+    const cash = num(row[tp.cash]);
+    if (cash > 0) add(String(row[tp.code]).trim(), { date: officialIsoDate(row[tp.date]), cash, source: 'TPEx' });
+  }
+  return events;
+}
+
+export function compareOfficialDividends(stocks, inputs, official, asOf) {
+  const mismatches = [];
+  const mixedCodes = [];
+  let matched = 0;
+  for (const stock of stocks) {
+    const code = normalizedCode(stock);
+    const mine = new Map();
+    for (const row of inputs.get(code)?.dv || []) {
+      if (inDividendWindow(row.CashExDividendTradingDate, asOf) && cashOf(row) > 0) mine.set(row.CashExDividendTradingDate, (mine.get(row.CashExDividendTradingDate) || 0) + cashOf(row));
+    }
+    const theirs = (official.get(code) || []).filter(event => inDividendWindow(event.date, asOf));
+    const mineDates = [...mine.keys()].sort().join(',');
+    const theirDates = [...new Set(theirs.map(event => event.date))].sort().join(',');
+    if (mineDates !== theirDates) { mismatches.push(`${code} 除息日 FinMind[${mineDates}] 官方[${theirDates}]`); continue; }
+    const wrong = theirs.filter(event => event.cash != null && Math.abs(event.cash - mine.get(event.date)) > Math.max(0.01, event.cash * 0.005));
+    if (wrong.length) { mismatches.push(`${code} 金額 ${wrong.map(event => `${event.date} FinMind ${+mine.get(event.date).toFixed(4)} 官方 ${event.cash}`).join('、')}`); continue; }
+    if (theirs.some(event => event.cash == null)) mixedCodes.push(code);
+    else matched += 1;
+  }
+  return { matched, mixedCodes, mismatches };
+}
+
+export function parseOfficialReductions(payload) {
+  // 證交所 TWTAUU：{stat, fields, data}；櫃買中心 revivt：{tables:[{fields, data}]}。兩者欄名相同。
+  const table = Array.isArray(payload?.tables) ? payload.tables[0] : payload;
+  if (!Array.isArray(payload?.tables) && payload?.stat !== 'OK') {
+    if (/沒有符合條件/.test(String(payload?.stat ?? ''))) return [];
+    throw new Error('證交所減資資料無法取得');
+  }
+  if (!table || !Array.isArray(table.data)) throw new Error('櫃買中心減資資料無法取得');
+  if (!table.data.length) return [];
+  const idx = { date: fieldIndex(table.fields, '恢復買賣日期'), code: fieldIndex(table.fields, '股票代號') };
+  return table.data.map(row => ({ date: officialIsoDate(row[idx.date]), code: String(row[idx.code]).trim() }));
+}
+
+export function corporateActionFindings(stocks, inputs, reductions, compute, asOf, from = CORPORATE_ACTION_CHECK_FROM) {
+  // 兩道檢查：(1) 證交所減資表裡有、但兩張分割表沒登錄的事件；(2) 扣除除息與配股後，
+  // 單日漲跌仍超過 10.5%（台股漲跌幅上限 10%）的價格，通常代表沒登錄的分割、減資或面額變更。
+  const findings = [];
+  const codes = new Set(stocks.map(normalizedCode));
+  for (const { code, date } of reductions) {
+    if (codes.has(code) && date >= from && !(CORPORATE_ACTIONS[code] || []).some(action => action.effectiveDate === date)) findings.push(`${code} ${date} 官方減資未登錄`);
+  }
+  for (const stock of stocks) {
+    const code = normalizedCode(stock);
+    const input = inputs.get(code);
+    const rows = (input?.pr || []).filter(row => row.date >= from && row.date <= asOf);
+    const cash = new Map();
+    const stockDiv = new Map();
+    for (const row of input?.dv || []) {
+      if (row.CashExDividendTradingDate) cash.set(row.CashExDividendTradingDate, (cash.get(row.CashExDividendTradingDate) || 0) + cashOf(row));
+      if (row.StockExDividendTradingDate) stockDiv.set(row.StockExDividendTradingDate, (stockDiv.get(row.StockExDividendTradingDate) || 0) + stockDividendOf(row));
+    }
+    for (let i = 1; i < rows.length; i += 1) {
+      const before = rows[i - 1];
+      const after = rows[i];
+      const fBefore = compute.caFactor(code, before.date);
+      const fAfter = compute.caFactor(code, after.date);
+      const between = date => date > before.date && date <= after.date; // 除息日可能落在休市日（如颱風假），要算到下一個交易日
+      const registered = (CORPORATE_ACTIONS[code] || []).some(action => between(action.effectiveDate));
+      const cashBetween = [...cash].filter(([date]) => between(date)).reduce((sum, [, value]) => sum + value, 0);
+      const stockBetween = registered ? 0 : [...stockDiv].filter(([date]) => between(date)).reduce((sum, [, value]) => sum + value, 0);
+      const reference = (before.close / fBefore - cashBetween / fAfter) / (1 + stockBetween / 10);
+      const change = (after.close / fAfter) / reference - 1;
+      if (Math.abs(change) > 0.105) findings.push(`${code} ${after.date} 單日 ${(change * 100).toFixed(1)}%`);
+    }
+  }
+  return findings;
+}
+
+async function fetchOfficialJson(url, fetchImpl = fetch) {
+  const response = await fetchImpl(url, OFFICIAL_HEADERS);
+  if (!response.ok) throw new Error(`official source HTTP ${response.status}`);
+  return response.json();
+}
+
+export async function dividendUpdate(stocks, asOf, indexText, { cacheDir = null, fetchImpl = fetch, sleep } = {}) {
+  const compute = loadPageCompute(indexText, asOf);
+  const codes = stocks.map(normalizedCode);
+  const urls = officialDividendUrls(asOf);
+  const [twse, tpex, twseReductions, tpexReductions] = await Promise.all([urls.twse, urls.tpex, urls.reductions, urls.tpexReductions].map(url => fetchOfficialJson(url, fetchImpl)));
+  const official = parseOfficialDividendEvents({ twse, tpex });
+  const reductions = [...parseOfficialReductions(twseReductions), ...parseOfficialReductions(tpexReductions)];
+  const inputs = await fetchDividendInputs(codes, asOf, { cacheDir, fetchImpl, sleep });
+  const check = compareOfficialDividends(stocks, inputs, official, asOf);
+  if (check.mismatches.length) throw new Error(`官方股利核對不一致（${check.mismatches.length} 檔），不寫入：${check.mismatches.join('；')}`);
+  const findings = corporateActionFindings(stocks, inputs, reductions, compute, asOf);
+  if (findings.length) throw new Error(`發現未登錄的股數變更，不寫入：${findings.join('；')}`);
+  const candidate = buildDividendCandidate(stocks, inputs, asOf, compute);
+  return { ...candidate, check, reductionsChecked: reductions.length, windowStart: shiftDate(asOf, -364) };
+}
+
 function fundamentalsFrom(brief) {
   const old = brief.sourceMeta?.stockPool?.fundamentals;
   if (old) return old; // Never manufacture dates or a quarterly update.
@@ -620,7 +883,10 @@ function fundamentalsFrom(brief) {
 async function main() {
   if (args.has('--self-test')) return selfTest();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) throw new Error('--date must be YYYY-MM-DD');
-  if (!['price', 'fundamentals', 'both'].includes(target)) throw new Error('--target must be price, fundamentals, or both');
+  if (!['price', 'dividends', 'fundamentals', 'both', 'weekly'].includes(target)) throw new Error('--target must be price, dividends, fundamentals, both, or weekly');
+  const doPrice = ['price', 'both', 'weekly'].includes(target);
+  const doDividends = ['dividends', 'weekly'].includes(target);
+  const doFundamentals = ['fundamentals', 'both', 'weekly'].includes(target);
   const [indexText, morningText] = await Promise.all([fs.readFile(INDEX_FILE, 'utf8'), fs.readFile(MORNING_FILE, 'utf8')]);
   const data = parseEmbeddedJson(indexText, 'DEFAULT_DATA');
   const brief = parseBrief(morningText);
@@ -639,8 +905,9 @@ async function main() {
   let stocks = existingSnapshot?.stocks || data.value;
   let priceMeta = existingSnapshot?.price || brief.value.sourceMeta?.stockPool?.price;
   let fundamentals = existingSnapshot?.fundamentals || fundamentalsFrom(brief.value);
+  let dividends = existingSnapshot?.dividends || null;
   if ((target === 'fundamentals') && !priceMeta) throw new Error('fundamentals-only update requires an existing canonical price snapshot; run --target=price or --target=both first');
-  if (target === 'price' || target === 'both') {
+  if (doPrice) {
     const priceResult = await pricesWithFallback(stocks, requestedDate);
     const candidate = buildCandidate(stocks, priceResult.prices, requestedDate, priceResult.fallbackDates);
     if (candidate.covered !== stocks.length || candidate.excludedCodes.length !== 0) {
@@ -667,7 +934,24 @@ async function main() {
       method: '依當日收盤價重算股利率與便宜度；僅在 59/59 價格完整覆蓋時寫入'
     };
   }
-  if (target === 'fundamentals' || target === 'both') {
+  if (doDividends) {
+    if (!doPrice && priceMeta?.asOf !== requestedDate) throw new Error(`股利更新需要 ${requestedDate} 的股價快照（目前 ${priceMeta?.asOf ?? '無'}）；請改用 --target=weekly`);
+    const result = await dividendUpdate(stocks, requestedDate, indexText, { cacheDir: cacheDirArg });
+    stocks = result.updated;
+    priceMeta = { ...priceMeta, medCheap: result.medCheap, medCheapSample: result.cheapSampleSize, cheapSampleSize: result.cheapSampleSize };
+    dividends = {
+      source: 'FinMind TaiwanStockPrice＋TaiwanStockDividend（算法同 index.html computeJS）',
+      asOf: requestedDate,
+      fetchedAt: new Date().toISOString(),
+      coverage: `${stocks.length}/${stocks.length}`,
+      officialCheck: { source: '證交所 TWT49U、櫃買中心除權息', from: result.windowStart, to: requestedDate, matched: result.check.matched, cashAndStockCombined: result.check.mixedCodes },
+      corporateActionCheck: { source: '證交所 TWTAUU、櫃買中心減資恢復買賣', from: CORPORATE_ACTION_CHECK_FROM, officialReductions: result.reductionsChecked, unregistered: 0 },
+      guardedCodes: result.guardedCodes,
+      changedCodes: result.changedCodes,
+      method: '近一年現金股利（一年一配只算最新一次；18 個月內配過不算 0）、五年平均殖利率、回撤、波動、填息率；官方核對 59/59 且無未登錄股數變更才寫入'
+    };
+  }
+  if (doFundamentals) {
     const rowsByCode = new Map();
     const required = stocks.filter(stock => stock.type !== 'etf');
     const queue = [...required];
@@ -676,10 +960,24 @@ async function main() {
       while (queue.length) {
         const stock = queue.shift();
         const code = String(stock.code).padStart(4, '0');
-        try { rowsByCode.set(code, await finMindFundamentals(code)); }
+        // 有 --cache-dir 時財報原始列也存起來：乾跑與正式寫入用同一份，不重抓、不多耗 FinMind 額度。
+        const cacheFile = cacheDirArg ? path.join(cacheDirArg, requestedDate, `fundamentals-${code}.json`) : null;
+        try {
+          let rows = null;
+          if (cacheFile) { try { rows = JSON.parse(await fs.readFile(cacheFile, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; } }
+          if (!rows) {
+            rows = await finMindFundamentals(code);
+            if (cacheFile) { await fs.mkdir(path.dirname(cacheFile), { recursive: true }); await fs.writeFile(cacheFile, JSON.stringify(rows), 'utf8'); }
+          }
+          rowsByCode.set(code, rows);
+        }
         catch (error) { rowsByCode.set(code, []); failures.push(`${code}: ${error.message}`); }
       }
     }));
+    const quota = failures.find(failure => /HTTP 402/.test(failure));
+    if (quota) throw new Error(`財報抓取中斷，不寫入：${quota}`);
+    // 每週更新不接受任何一檔財報抓取失敗（網路錯誤、429、5xx 等），整批不寫入，下週或重跑時再補。
+    if (target === 'weekly' && failures.length) throw new Error(`財報抓取失敗 ${failures.length} 檔，不寫入：${failures.slice(0, 3).join('；')}`);
     const candidate = buildFundamentalsCandidate(stocks, rowsByCode, requestedDate);
     stocks = candidate.updated;
     fundamentals = {
@@ -708,12 +1006,14 @@ async function main() {
     generatedAt: new Date().toISOString(),
     price: priceMeta,
     fundamentals,
+    ...(dividends ? { dividends } : {}),
     stocks
   };
   if (dryRun) {
     console.log(`DRY RUN OK: target=${target}, stocks=${stocks.length}, date=${requestedDate}`);
-    if (target === 'price' || target === 'both') console.log(`PRICE: coverage=${priceMeta.coverage}, cheapSampleSize=${priceMeta.cheapSampleSize}, medCheap=${priceMeta.medCheap}`);
-    if (target === 'fundamentals' || target === 'both') console.log(`FUNDAMENTALS: coverage=${fundamentals.coverage}, medAKSampleSize=${fundamentals.medAKSampleSize}, periodEnd=${fundamentals.periodEnd}, validUntil=${fundamentals.validUntil}, medAK=${fundamentals.medAK}`);
+    if (doPrice) console.log(`PRICE: coverage=${priceMeta.coverage}, cheapSampleSize=${priceMeta.cheapSampleSize}, medCheap=${priceMeta.medCheap}`);
+    if (doDividends) console.log(`DIVIDENDS: coverage=${dividends.coverage}, officialMatched=${dividends.officialCheck.matched}, cashAndStockCombined=${dividends.officialCheck.cashAndStockCombined.join('|') || '-'}, guarded=${dividends.guardedCodes.join('|') || '-'}, changed=${dividends.changedCodes.length}, medCheap=${priceMeta.medCheap}`);
+    if (doFundamentals) console.log(`FUNDAMENTALS: coverage=${fundamentals.coverage}, medAKSampleSize=${fundamentals.medAKSampleSize}, periodEnd=${fundamentals.periodEnd}, validUntil=${fundamentals.validUntil}, medAK=${fundamentals.medAK}`);
     console.log('No files were changed. Re-run with --write only after reviewing this output.');
     return;
   }
