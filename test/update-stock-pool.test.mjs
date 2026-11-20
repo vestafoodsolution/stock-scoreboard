@@ -459,6 +459,17 @@ assert.equal(ttmDiv([cashRow('2022-07-26', 0.508, '110年')], '2026-11-19'), 0, 
 assert.equal(ttmDiv([cashRow('2025-12-17', 9.5, '114年前半年度'), cashRow('2026-07-13', 12.3, '114年後半年度')], '2026-11-19'), 21.8);
 assert.equal(ttmDiv([cashRow('2026-03-20', 17, '114年後半年度'), cashRow('2026-09-21', 18, '115年前半年度')], '2026-11-19'), 35);
 
+// 2026-11-20 規則：只算最近一次除息往前 300 天內的配息，不看標籤
+assert.equal(ttmDiv([cashRow('2025-07-17', 2.2, '113年第4季'), cashRow('2026-07-16', 2.3, '114年第4季')], '2026-07-20'), 2.3, '一年一配但標籤寫季別（亞泥）也不得重複算');
+assert.equal(ttmDiv([cashRow('2025-06-13', 5.0, '113年後半年度'), cashRow('2026-06-12', 6.0, '114年後半年度')], '2026-06-20'), 6, '一年一配但標籤寫半年度（國巨）也不得重複算');
+const quarterly = ['2025-11-25', '2026-02-24', '2026-05-26', '2026-08-25', '2026-11-17'].map((d, i) => cashRow(d, 1 + i / 10, '115'));
+assert.equal(ttmDiv(quarterly, '2026-11-19'), 1.1 + 1.2 + 1.3 + 1.4, '季配一年內剛好五次時，只算最近四次');
+// 五年平均殖利率不得重複計算：除息日年年提早、股價與股利都固定時，平均殖利率就是 5 ÷ 100
+const drifting = [cashRow('2021-08-12', 5, '109年'), cashRow('2022-07-21', 5, '110年'), cashRow('2023-07-11', 5, '111年'), cashRow('2024-07-01', 5, '112年'), cashRow('2025-06-30', 5, '113年'), cashRow('2026-06-29', 5, '114年')];
+const driftOut = pageCompute.computeJS(priceSeries.filter(r => r.date <= '2026-11-19'), drifting, [], [], '9999', at('2026-11-19'));
+assert.equal(driftOut.avgYld5, 0.05, '五年平均殖利率不得把前一年的股利算進來');
+assert.equal(driftOut.cheap, 1);
+
 // 股利欄位寫入：用官方收盤價、重新判定排除、清掉過期的除息日期、記下基準日
 const divStock = { name: '測', code: '9999', type: 'stock', J: 100, Jdate: '2026-11-19', div1: 0, divEarn1: 0, avgYld5: 0.05, cheap: 0, divYldAll: 0, exDate: '2025-07-01', payDate: '2025-08-01',
   q1: 1, q2: 1, q3: 1, q4: 1, q1Period: '2025Q3', q2Period: '2025Q4', q3Period: '2026Q1', q4Period: '2026Q2',

@@ -948,7 +948,7 @@ async function main() {
       corporateActionCheck: { source: '證交所 TWTAUU、櫃買中心減資恢復買賣', from: CORPORATE_ACTION_CHECK_FROM, officialReductions: result.reductionsChecked, unregistered: 0 },
       guardedCodes: result.guardedCodes,
       changedCodes: result.changedCodes,
-      method: '近一年現金股利（一年一配只算最新一次；18 個月內配過不算 0）、五年平均殖利率、回撤、波動、填息率；官方核對 59/59 且無未登錄股數變更才寫入'
+      method: '近一年現金股利與五年平均殖利率都只算最近一次除息往前 300 天內的配息（18 個月內配過不算 0）；另含回撤、波動、填息率；官方核對 59/59 且無未登錄股數變更才寫入'
     };
   }
   if (doFundamentals) {

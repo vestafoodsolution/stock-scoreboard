@@ -769,18 +769,18 @@ function computeJS(price,div,fs,bs,code,asOfMs){
   const pbefore=t=>{let b=null;for(const p of px){if(p[0]<=t)b=p[1];else break;}return b;};
   // 股利事件:每股配息額 ÷factor(換算到現行基準);同時保留除息日/發放日
   const evs=(div||[]).map(r=>{const exs=r.CashExDividendTradingDate, f=caFactor(code,exs);
-      return [Dt(exs), (+r.CashEarningsDistribution||0)/f, (+r.CashStatutorySurplus||0)/f, String(r.year||'')];})
-    .filter(e=>e[0]&&(e[1]+e[2])>0).map(e=>[e[0].getTime(),e[1],e[2],e[3]]).sort((a,b)=>a[0]-b[0]);
-  const Y=365*DAY, tdiv=t=>evs.filter(e=>t-Y<e[0]&&e[0]<=t).reduce((a,e)=>a+e[1]+e[2],0);
-  // 近一年股利(顯示、殖利率、便宜度用):365 天視窗 + 兩條防呆,避免除息日前後移動造成假訊號
-  //  1) 一年一配(FinMind year 標籤為「NNN年」)的公司,視窗內有兩次時只算最新一次(除息日提早)
-  //  2) 視窗內沒有配息、但 18 個月內配過,算最近一次(除息日延後);超過 18 個月才算 0
-  const annual=e=>/^\d+年$/.test(e[3]);
-  const ttmEv=t=>{ let w=evs.filter(e=>t-Y<e[0]&&e[0]<=t);
-    if(w.length){ const ann=w.filter(annual); if(ann.length>=2){ const keep=ann[ann.length-1]; w=w.filter(e=>!annual(e)||e===keep); } return w; }
-    const past=evs.filter(e=>e[0]<=t), lastEv=past[past.length-1];
-    if(lastEv&&t-lastEv[0]<=548*DAY) return annual(lastEv)?[lastEv]:past.filter(e=>e[3]===lastEv[3]);
-    return []; };
+      return [Dt(exs), (+r.CashEarningsDistribution||0)/f, (+r.CashStatutorySurplus||0)/f];})
+    .filter(e=>e[0]&&(e[1]+e[2])>0).map(e=>[e[0].getTime(),e[1],e[2]]).sort((a,b)=>a[0]-b[0]);
+  // 近一年股利:365 天視窗內,只算「最近一次除息往前 300 天內」的現金股利,避免除息日前後移動造成假訊號
+  //  1) 一年一配的公司除息日提早時,去年那次(相隔約 350 天)不算進來;半年配、季配的間隔都在 300 天內,照常加總
+  //  2) 視窗內沒有配息、但 18 個月內配過,算最近那一輪(除息日延後);超過 18 個月才算 0
+  //  五年平均殖利率的每一個點也用同一個定義,兩邊不會一個重複算、一個不算(2026-11-20 Brook 確認)
+  const Y=365*DAY, ROUND=300*DAY;
+  const ttmEv=t=>{ const w=evs.filter(e=>t-Y<e[0]&&e[0]<=t);
+    const pool=w.length?w:evs.filter(e=>e[0]<=t), lastEv=pool[pool.length-1];
+    if(!lastEv||(!w.length&&t-lastEv[0]>548*DAY)) return [];
+    return pool.filter(e=>lastEv[0]-e[0]<ROUND); };
+  const tdiv=t=>ttmEv(t).reduce((a,e)=>a+e[1]+e[2],0);
   const ttm=ttmEv(now), ttmAll=ttm.reduce((a,e)=>a+e[1]+e[2],0), ttmEarn=ttm.reduce((a,e)=>a+e[1],0);
   if(px.length&&evs.length){ const last=o.J;
     o.divEarn1=+ttmEarn.toFixed(3); o.div1=+ttmAll.toFixed(3);
